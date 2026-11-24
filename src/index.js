@@ -1,5 +1,5 @@
 // Campori — versão simples (Cloudflare Worker + D1)
-const VERSAO = '4.2';
+const VERSAO = '4.3';
 
 const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const hoje = () => new Date(Date.now() + 3600e3).toISOString().slice(0, 10); // hora de Angola

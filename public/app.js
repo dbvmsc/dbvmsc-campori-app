@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '4.2';
+const VERSAO = '4.3';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -400,7 +400,7 @@ V.tarefas = async (el) => {
 
 // ---------- CLUBES (Regional / Missão) ----------
 let busca = '', reg = '', alertaF = '';
-const ALERTAS = [['sem_director', 'Sem director com acesso', (c) => !c.dir_id], ['sem_acampantes', 'Sem acampantes', (c) => !c.n],
+const ALERTAS = [['nomes', 'Com nomes por adicionar', (c) => semNomeDe(c) > 0], ['sem_director', 'Sem director com acesso', (c) => !c.dir_id], ['sem_acampantes', 'Sem acampantes', (c) => !c.n],
   ['sem_adultos', 'Sem adultos inscritos', (c) => c.n && !c.dir], ['racio', 'Poucos adultos para os desbravadores', (c) => c.alertas.some((a) => a.startsWith('Mais de'))],
   ['atrasadas', 'Com tarefas atrasadas', (c) => c.atrasadas > 0], ['pagar', 'Com pagamentos em falta (após o prazo)', (c) => c.alertas.some((a) => a.includes('por pagar'))],
   ['aut', 'Com autorizações em falta (após o prazo)', (c) => c.alertas.some((a) => a.includes('autorização'))], ['pedidos', 'Com pedidos à espera', (c) => c.pedidos > 0]];
@@ -750,7 +750,7 @@ V.geral = async (el) => {
   const s = (k, l = ls) => l.reduce((a, c) => a + (c[k] || 0), 0);
   const n = s('n'), dbv = s('dbv'), dir = s('dir'), npd = s('pedidos');
   const regs = {}; for (const c of ls) (regs[c.regiao] ||= []).push(c);
-  const att = ALERTAS.map(([k, t, fn]) => [k, t, ls.filter(fn).length]).filter((x) => x[2]);
+  const att = ALERTAS.map(([k, t, fn]) => [k, k === 'nomes' ? `${t} (${oficiais(ls).sem} nomes em falta)` : t, ls.filter(fn).length]).filter((x) => x[2]);
   const top = [...ls].sort((a, b) => b.n - a.n).slice(0, 5);
   el.innerHTML = `<div class="print-h"><b>${esc(ev.nome)}</b> — Painel geral — ${dt(h)}</div>
   ${npd ? `<div class="alert" style="cursor:pointer" id="vp">📨 <b>${npd} pedido(s)</b> de inclusão/retirada à espera de resposta.</div>` : ''}
@@ -765,7 +765,7 @@ V.geral = async (el) => {
   </div>
   <div class="card" style="margin-top:12px">${barra('Pagamentos', pct(s('recebido'), s('devido')))}${barra('Autorizações dos pais', pct(dbv - s('sem_aut'), dbv))}${barra('Fichas médicas', pct(n - s('sem_ficha'), n))}${barra('Fichas individuais completas', pct(s('fichas'), n))}${barra('Material individual (média)', ls.length ? Math.round(s('pct_material') / ls.length) : 0)}${barra('Checklist dos clubes', pct(s('feitas'), s('total')))}${barra('Clubes com director na app', pct(ls.filter((c) => c.dir_id).length, ls.length))}</div>
   <h2>Pontos de atenção</h2>
-  <div class="list">${att.map(([k, t, q]) => `<div class="row" data-a="${k}"><div class="t"><b>${esc(t)}</b></div><span class="tag ${['sem_adultos', 'racio', 'pedidos'].includes(k) ? 'no' : 'w'}">${q} clube${q > 1 ? 's' : ''}</span></div>`).join('') || '<div class="alert ok">✅ Nenhum ponto de atenção.</div>'}</div>
+  <div class="list">${att.map(([k, t, q]) => `<div class="row" data-a="${k}"><div class="t"><b>${esc(t)}</b></div><span class="tag ${['sem_adultos', 'racio', 'pedidos', 'nomes'].includes(k) ? 'no' : 'w'}">${q} clube${q > 1 ? 's' : ''}</span></div>`).join('') || '<div class="alert ok">✅ Nenhum ponto de atenção.</div>'}</div>
   <h2>${M ? 'Por região' : 'Clubes da região'}</h2>
   ${M ? `<div class="list">${Object.entries(regs).sort((a, b) => s('n', b[1]) - s('n', a[1])).map(([r, cs]) => { const pp = pct(s('recebido', cs), s('devido', cs)), pc = pct(s('feitas', cs), s('total', cs));
     return `<div class="row" data-r="${esc(r)}"><div class="t"><b>${esc(r)}</b><small>${cs.length} clubes · ${s('n', cs)} acampantes (${s('dbv', cs)}/${s('dir', cs)}) · ${cs.filter((c) => c.dir_id).length} directores na app</small>
