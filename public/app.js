@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '2.6';
+const VERSAO = '2.7';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -50,7 +50,7 @@ async function iniciar() {
   if (!S.token) return (await api('GET', '/estado').catch(() => ({ configurado: 1 }))).configurado ? vLogin() : vSetup();
   try { S.me = await api('GET', '/me'); S.clubes = await api('GET', '/clubes'); } catch (e) { return; }
   const g = +st.get('cs_clube');
-  S.clube = papel() === 'director' ? S.me.user.clube_id : S.clubes.some((c) => c.id === g) ? g : S.clubes[0]?.id;
+  S.clube = papel() === 'director' ? S.me.user.clube_id : S.clubes.some((c) => c.id === g) ? g : null;
   if (!location.hash) location.hash = papel() === 'director' ? '#/painel' : '#/visao';
   render();
   if (S.me.user.trocar_senha) setTimeout(() => mSenha(true), 300);
@@ -80,16 +80,21 @@ function abas() {
 function render() {
   if (!S.me) return;
   const r = rota(), u = S.me.user, escuro = document.documentElement.dataset.tema === 'escuro';
-  const sel = papel() !== 'director' && S.clubes.length ? `<select id="sc">${S.clubes.map((c) => `<option value="${c.id}" ${c.id === S.clube ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select>` : '';
   $('#app').innerHTML = `${navigator.onLine ? '' : '<div class="off">Sem internet</div>'}
-  <header class="top${sel ? " comsel" : ""}"><img class="logo" src="/logo.png" alt=""><div class="tt" id="eu" style="cursor:pointer"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
-   ${sel}<button class="ib" id="bt" title="Tema">${escuro ? IC.sol : IC.lua}</button><button class="sair" id="bs">${IC.sair}<span>Sair</span></button></header>
+  <header class="top"><img class="logo" src="/logo.png" alt=""><div class="tt" id="eu" style="cursor:pointer"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
+   <button class="ib" id="bt" title="Tema">${escuro ? IC.sol : IC.lua}</button><button class="sair" id="bs">${IC.sair}<span>Sair</span></button></header>
   <div class="wrap"><nav class="side">${abas().map(([k, n]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
   <nav class="nav">${abas().map(([k, n]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}</nav>`;
   $('#bs').onclick = () => sair(); $('#eu').onclick = () => mSenha(false);
   $('#bt').onclick = () => { st.set('cs_tema', escuro ? 'claro' : 'escuro'); tema(); render(); };
-  if ($('#sc')) $('#sc').onchange = (e) => { S.clube = +e.target.value; st.set('cs_clube', S.clube); if (rota() === 'visao') location.hash = '#/painel'; else render(); };
-  (V[r] || V.painel)($('#main')).catch((e) => ($('#main').innerHTML = `<div class="alert">${esc(e.message)}</div>`));
+  const main = $('#main'), coord = papel() !== 'director', deClube = ['painel', 'pessoas', 'material', 'tarefas', 'pais'].includes(r);
+  if (coord && deClube && !S.clube) { escolherClube(main); scrollTo(0, 0); return; }
+  (V[r] || V.painel)(main).then(() => {
+    if (!coord || !deClube || !S.clube) return;
+    const c = S.clubes.find((x) => x.id === S.clube) || {};
+    main.insertAdjacentHTML('afterbegin', `<div class="clubebar noprint"><span>📍 <b>${esc(c.nome || '')}</b> <small>${esc(c.regiao || '')}${pode() ? '' : ' · só leitura'}</small></span><button class="btn sm sec" id="tc">Trocar</button></div>`);
+    $('#tc').onclick = () => modal('<h3>Escolher clube</h3><div id="ec"></div><div class="acts"><button class="btn sec" onclick="fechar()">Fechar</button></div>', (m) => escolherClube($('#ec', m), true));
+  }).catch((e) => (main.innerHTML = `<div class="alert">${esc(e.message)}</div>`));
   scrollTo(0, 0);
 }
 addEventListener('hashchange', render); addEventListener('online', render); addEventListener('offline', render);
@@ -99,9 +104,23 @@ addEventListener('hashchange', render); addEventListener('online', render); addE
     if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return; const a = abas().map((t) => t[0]), i = a.indexOf(rota()), j = i + (dx < 0 ? 1 : -1); if (i >= 0 && a[j]) location.hash = '#/' + a[j]; }, { passive: true });
 })();
 
+// pesquisa de clube (Regional / Missão) — substitui a lista do topo
+function escolherClube(el, emJanela) {
+  let q = '';
+  el.innerHTML = `${emJanela ? '' : '<h1>Escolha um clube</h1><p class="sub">Escreva parte do nome do clube, da igreja ou da região.</p>'}<input type="search" id="qc" placeholder="Procurar clube…" autocomplete="off"><div class="list" id="rc" style="margin-top:10px"></div>`;
+  const desenhar = () => {
+    const n = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const f = S.clubes.filter((c) => !q || n(c.nome + ' ' + c.igreja + ' ' + c.regiao).includes(n(q)));
+    $('#rc', el).innerHTML = f.slice(0, 25).map((c) => `<div class="row" data-c="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}</small></div></div>`).join('')
+      + (f.length > 25 ? `<p class="sub">+ ${f.length - 25} clubes. Escreva mais letras para encontrar.</p>` : '') + (f.length ? '' : '<p class="sub">Nenhum clube encontrado.</p>');
+    $('#rc', el).querySelectorAll('[data-c]').forEach((r) => (r.onclick = () => { S.clube = +r.dataset.c; st.set('cs_clube', S.clube); fechar(); if (!['painel', 'pessoas', 'material', 'tarefas', 'pais'].includes(rota())) location.hash = '#/painel'; else render(); }));
+  };
+  $('#qc', el).oninput = (e) => { q = e.target.value; desenhar(); };
+  desenhar(); if (innerWidth > 700) $('#qc', el).focus();
+}
 function modal(h, fn) { const m = $('#modal'); m.innerHTML = `<div class="sheet">${h}</div>`; m.hidden = false; m.onclick = (e) => { if (e.target === m) fechar(); }; fn && fn(m); }
 function fechar() { $('#modal').hidden = true; $('#modal').innerHTML = ''; }
-const ro = () => (pode() ? '' : `<div class="ro">Só leitura: está a ver o clube <b>${esc(S.clubes.find((c) => c.id === S.clube)?.nome)}</b>.</div>`);
+const ro = () => '';
 const barra = (n, p) => { p = Math.max(0, Math.min(100, p || 0)); return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13px"><span>${n}</span><b>${p}%</b></div><div class="bar ${p < 40 ? 'r' : p < 80 ? 'o' : ''}"><span style="width:${p}%"></span></div></div>`; };
 const fab = (fn) => { const b = document.createElement('button'); b.className = 'fab noprint'; b.innerHTML = IC.mais; b.onclick = fn; $('#main').append(b); };
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);

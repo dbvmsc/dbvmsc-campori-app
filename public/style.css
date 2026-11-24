@@ -174,3 +174,6 @@ a.btn{text-decoration:none}
 .hero:after{right:12px;top:12px;width:62px;height:84px;border-radius:0;background:url(/logo.png) center/contain no-repeat}
 .hero .marcos{margin-right:0}
 .hero>small{display:block;padding-right:70px}
+.clubebar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--chip);border-radius:14px;padding:8px 10px 8px 14px;margin-bottom:12px}
+.clubebar span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clubebar small{color:var(--mut)}
