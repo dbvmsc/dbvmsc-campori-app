@@ -1,5 +1,5 @@
 // Campori — versão simples (Cloudflare Worker + D1)
-const VERSAO = '4.4';
+const VERSAO = '4.6';
 
 const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const hoje = () => new Date(Date.now() + 3600e3).toISOString().slice(0, 10); // hora de Angola
@@ -182,14 +182,14 @@ async function api(req, DB, url) {
 
   if (p[0] === 'clubes') {
     const w = u.papel === 'regional' ? 'WHERE c.regiao_id=' + +u.regiao_id : u.papel === 'director' ? 'WHERE c.id=' + +u.clube_id : '';
-    return json((await DB.prepare(`SELECT c.id, c.nome, c.igreja, c.regiao_id, r.nome regiao FROM clubes c JOIN regioes r ON r.id=c.regiao_id ${w} ORDER BY r.nome, c.nome`).all()).results);
+    return json((await DB.prepare(`SELECT c.id, c.nome, c.igreja, c.regiao_id, r.nome regiao, c.contacto_nome, c.contacto_tel FROM clubes c JOIN regioes r ON r.id=c.regiao_id ${w} ORDER BY r.nome, c.nome`).all()).results);
   }
 
   // Visão geral (Regional / Missão)
   if (p[0] === 'visao') {
     if (u.papel === 'director') throw new E('Sem permissão', 403);
     const w = u.papel === 'regional' ? 'WHERE c.regiao_id=' + +u.regiao_id : '';
-    const cl = (await DB.prepare(`SELECT c.id, c.nome, c.regiao_id, c.inscritos_oficial, r.nome regiao, d.id dir_id, d.nome dir_nome, d.telefone dir_tel, d.email dir_email
+    const cl = (await DB.prepare(`SELECT c.id, c.nome, c.regiao_id, c.inscritos_oficial, c.contacto_nome, c.contacto_tel, r.nome regiao, d.id dir_id, d.nome dir_nome, d.telefone dir_tel, d.email dir_email, COALESCE(d.nome, c.contacto_nome) ct_nome, COALESCE(d.telefone, c.contacto_tel) ct_tel
       FROM clubes c JOIN regioes r ON r.id=c.regiao_id LEFT JOIN utilizadores d ON d.clube_id=c.id AND d.papel='director' AND COALESCE(d.funcao,'director')='director' AND d.ativo=1 ${w} GROUP BY c.id ORDER BY r.nome, c.nome`).all()).results;
     const m = await metricas(DB, cl.map((c) => c.id));
     const pend = Object.fromEntries((await DB.prepare("SELECT clube_id, COUNT(*) n FROM pedidos WHERE estado='pendente' GROUP BY clube_id").all()).results.map((r) => [r.clube_id, r.n]));
@@ -298,7 +298,7 @@ async function api(req, DB, url) {
     if (u.papel === 'director') throw new E('Sem permissão', 403);
     const wr = u.papel === 'regional' ? 'WHERE c.regiao_id=' + +u.regiao_id : '';
     if (p[0] === 'secretaria' && M === 'GET') {
-      const cl = (await DB.prepare(`SELECT c.id, c.nome, c.inscritos_oficial, c.regiao_id, r.nome regiao, d.id dir_id, d.nome dir_nome, d.telefone dir_tel FROM clubes c JOIN regioes r ON r.id=c.regiao_id
+      const cl = (await DB.prepare(`SELECT c.id, c.nome, c.inscritos_oficial, c.regiao_id, r.nome regiao, d.id dir_id, COALESCE(d.nome, c.contacto_nome) dir_nome, COALESCE(d.telefone, c.contacto_tel) dir_tel FROM clubes c JOIN regioes r ON r.id=c.regiao_id
         LEFT JOIN utilizadores d ON d.clube_id=c.id AND d.papel='director' AND COALESCE(d.funcao,'director')='director' AND d.ativo=1 ${wr} GROUP BY c.id`).all()).results;
       const m = await metricas(DB, cl.map((c) => c.id));
       const avent = Object.fromEntries((await DB.prepare("SELECT clube_id, COUNT(*) n FROM participantes WHERE obs LIKE '%Aventureiro%' GROUP BY clube_id").all()).results.map((r) => [r.clube_id, r.n]));
@@ -326,7 +326,7 @@ async function api(req, DB, url) {
     }
     if (p[0] === 'casos') {
       if (M === 'GET' && p[1]) {
-        const k = await DB.prepare(`SELECT k.*, c.nome clube, c.regiao_id, r.nome regiao, d.nome dir_nome, d.telefone dir_tel FROM casos k LEFT JOIN clubes c ON c.id=k.clube_id LEFT JOIN regioes r ON r.id=c.regiao_id
+        const k = await DB.prepare(`SELECT k.*, c.nome clube, c.regiao_id, r.nome regiao, COALESCE(d.nome, c.contacto_nome) dir_nome, COALESCE(d.telefone, c.contacto_tel) dir_tel FROM casos k LEFT JOIN clubes c ON c.id=k.clube_id LEFT JOIN regioes r ON r.id=c.regiao_id
           LEFT JOIN utilizadores d ON d.clube_id=c.id AND d.papel='director' AND COALESCE(d.funcao,'director')='director' AND d.ativo=1 WHERE k.id=?`).bind(+p[1]).first();
         if (!k || (u.papel === 'regional' && k.regiao_id !== u.regiao_id)) throw new E('Caso não encontrado', 404);
         return json({ ...k, notas: (await DB.prepare('SELECT * FROM caso_notas WHERE caso_id=? ORDER BY id').bind(k.id).all()).results });
@@ -356,8 +356,19 @@ async function api(req, DB, url) {
     }
   }
 
+  // ---- contacto do director de cada clube ----
+  if (p[0] === 'contacto' && M === 'PUT') {
+    if (u.papel === 'director') throw new E('Sem permissão', 403);
+    const c = await DB.prepare('SELECT * FROM clubes WHERE id=?').bind(+p[1]).first();
+    if (!c || (u.papel === 'regional' && c.regiao_id !== u.regiao_id)) throw new E('Clube não encontrado', 404);
+    const b = await body(), t = tel(b.telefone);
+    if (t && !/^9\d{8}$/.test(t)) throw new E('Telefone inválido (9 dígitos, começa por 9)');
+    await DB.prepare('UPDATE clubes SET contacto_nome=?, contacto_tel=? WHERE id=?').bind(String(b.nome || '').trim().slice(0, 120) || null, t, c.id).run();
+    return json({ ok: true });
+  }
+
   // ---- só Missão: contas e importação ----
-  if (['importar', 'contas', 'importar-acampantes', 'importar-oficiais'].includes(p[0]) && !missao) throw new E('Só a Missão', 403);
+  if (['importar', 'contas', 'importar-acampantes', 'importar-oficiais', 'importar-contactos'].includes(p[0]) && !missao) throw new E('Só a Missão', 403);
   if (p[0] === 'importar' && M === 'POST') {
     const regs = Object.fromEntries((await DB.prepare('SELECT * FROM regioes').all()).results.map((r) => [r.nome.toLowerCase(), r.id]));
     const res = { clubes: 0, acessos: [], erros: [] };
@@ -366,6 +377,7 @@ async function api(req, DB, url) {
       if (!rid || !l.clube) { res.erros.push(`Linha ${i + 2}: ${!rid ? `região "${l.regiao}" não existe` : 'falta o clube'}`); continue; }
       let c = await DB.prepare('SELECT id FROM clubes WHERE regiao_id=? AND nome=?').bind(rid, l.clube.trim()).first();
       if (!c) { c = { id: (await DB.prepare('INSERT INTO clubes (regiao_id,nome,igreja) VALUES (?,?,?)').bind(rid, l.clube.trim(), l.igreja || '').run()).meta.last_row_id }; res.clubes++; }
+      if (l.director || l.telefone) await DB.prepare('UPDATE clubes SET contacto_nome=COALESCE(?, contacto_nome), contacto_tel=COALESCE(?, contacto_tel) WHERE id=?').bind(String(l.director || '').trim() || null, /^9\d{8}$/.test(tel(l.telefone) || '') ? tel(l.telefone) : null, c.id).run();
       if (l.director && (l.telefone || l.email)) {
         try { res.acessos.push({ nome: l.director, clube: l.clube, ...(await criarConta(DB, { nome: l.director, telefone: l.telefone, email: l.email, papel: 'director', clube_id: c.id, regiao_id: rid })) }); }
         catch (e) { res.erros.push(`Linha ${i + 2} (${l.director}): ${e.message}`); }
@@ -403,6 +415,21 @@ async function api(req, DB, url) {
     }
     return json(res);
   }
+  // Contactos dos directores (Região;Clube;Director;Telefone) — só actualiza clubes que já existem
+  if (p[0] === 'importar-contactos' && M === 'POST') {
+    const regs = Object.fromEntries((await DB.prepare('SELECT * FROM regioes').all()).results.map((r) => [r.nome.toLowerCase(), r.id]));
+    const res = { actualizados: 0, erros: [] }, st = [];
+    for (const [i, l] of ((await body()).linhas || []).slice(0, 400).entries()) {
+      const rid = regs[String(l.regiao || '').trim().toLowerCase()], cn = String(l.clube || '').trim(), t = tel(l.telefone);
+      if (!rid || !cn) { res.erros.push(`Linha ${i + 2}: ${!rid ? `região "${l.regiao}" não existe` : 'falta o clube'}`); continue; }
+      if (t && !/^9\d{8}$/.test(t)) { res.erros.push(`Linha ${i + 2} (${cn}): telefone "${l.telefone}" inválido`); continue; }
+      const c = await DB.prepare('SELECT id FROM clubes WHERE regiao_id=? AND nome=?').bind(rid, cn).first();
+      if (!c) { res.erros.push(`Linha ${i + 2}: clube "${cn}" não existe na região ${l.regiao}`); continue; }
+      st.push(DB.prepare('UPDATE clubes SET contacto_nome=COALESCE(?, contacto_nome), contacto_tel=COALESCE(?, contacto_tel) WHERE id=?').bind(String(l.director || '').trim() || null, t, c.id)); res.actualizados++;
+    }
+    for (let i = 0; i < st.length; i += 100) await DB.batch(st.slice(i, i + 100));
+    return json(res);
+  }
   if (p[0] === 'oficial' && M === 'PUT') {
     if (!missao) throw new E('Só a Missão', 403);
     const b = await body(), n = b.inscritos === '' || b.inscritos == null ? null : Math.max(0, parseInt(b.inscritos, 10) || 0);
@@ -410,7 +437,10 @@ async function api(req, DB, url) {
     return json({ ok: true });
   }
   if (p[0] === 'contas') {
-    if (M === 'GET') return json((await DB.prepare(`SELECT u.id, u.nome, u.telefone, u.email, u.papel, r.nome regiao FROM utilizadores u LEFT JOIN regioes r ON r.id=u.regiao_id WHERE u.papel='regional' AND u.ativo=1 ORDER BY r.nome`).all()).results);
+    if (M === 'GET') {
+      const pap = url.searchParams.get('papel') === 'missao' ? 'missao' : 'regional';
+      return json((await DB.prepare(`SELECT u.id, u.nome, u.telefone, u.email, u.papel, r.nome regiao FROM utilizadores u LEFT JOIN regioes r ON r.id=u.regiao_id WHERE u.papel=? AND u.ativo=1 ORDER BY r.nome, u.nome`).bind(pap).all()).results);
+    }
     if (M === 'POST' && !p[1]) {
       const b = await body();
       if (b.papel === 'regional' && !b.regiao_id) throw new E('Escolha a região');
@@ -419,7 +449,11 @@ async function api(req, DB, url) {
         if (!c) throw new E('Clube não encontrado');
         await DB.prepare("UPDATE utilizadores SET ativo=0 WHERE clube_id=? AND papel='director' AND COALESCE(funcao,'director')='director'").bind(c.id).run(); // um director por clube
         b.regiao_id = c.regiao_id;
-      } else if (b.papel !== 'regional') throw new E('Papel inválido');
+        const r = await criarConta(DB, b);
+        await DB.prepare('UPDATE clubes SET contacto_nome=?, contacto_tel=COALESCE(?, contacto_tel) WHERE id=?').bind(b.nome.trim(), tel(b.telefone), c.id).run();
+        return json(r);
+      } else if (b.papel === 'missao') { b.regiao_id = null; b.clube_id = null; }
+      else if (b.papel !== 'regional') throw new E('Papel inválido');
       return json(await criarConta(DB, b));
     }
     if (M === 'POST' && p[2] === 'senha') {
@@ -429,7 +463,11 @@ async function api(req, DB, url) {
       await DB.batch([DB.prepare('UPDATE utilizadores SET senha_hash=?, salt=?, trocar_senha=1 WHERE id=?').bind(await hash(senha, salt), salt, a.id), DB.prepare('DELETE FROM sessoes WHERE user_id=?').bind(a.id)]);
       return json({ login: a.email || a.telefone, senha });
     }
-    if (M === 'DELETE') { await DB.batch([DB.prepare('UPDATE utilizadores SET ativo=0 WHERE id=?').bind(+p[1]), DB.prepare('DELETE FROM sessoes WHERE user_id=?').bind(+p[1])]); return json({ ok: true }); }
+    if (M === 'DELETE') {
+      if (+p[1] === u.id) throw new E('Não pode retirar o seu próprio acesso');
+      const a = await DB.prepare('SELECT papel FROM utilizadores WHERE id=? AND ativo=1').bind(+p[1]).first();
+      if (a?.papel === 'missao' && (await DB.prepare("SELECT COUNT(*) n FROM utilizadores WHERE papel='missao' AND ativo=1").first()).n <= 1) throw new E('Tem de ficar pelo menos uma conta da Missão');
+      await DB.batch([DB.prepare('UPDATE utilizadores SET ativo=0 WHERE id=?').bind(+p[1]), DB.prepare('DELETE FROM sessoes WHERE user_id=?').bind(+p[1])]); return json({ ok: true }); }
   }
 
   // ---- dados do clube: /api/c/:id/... ----
