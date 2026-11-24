@@ -14,7 +14,7 @@
       "binding": "DB",
       "database_name": "campori",
       // COLE AQUI o "Database ID" da base de dados "campori" (Cloudflare > Storage & Databases > D1)
-      "database_id": "COLE-AQUI-O-ID-DA-BASE-DE-DADOS"
+      "database_id": "b9e02479-7b6f-494a-9ac7-67b9127a5696"
     }
   ],
   "observability": { "enabled": true }
