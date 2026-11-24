@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '2.7';
+const VERSAO = '2.8';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -72,10 +72,12 @@ function vSetup() {
 
 // ---------- estrutura ----------
 const V = {};
+const coord = () => S.me && papel() !== 'director';
+const lk = (x) => (coord() ? '#/clube/' + x : '#/' + x); // ligação para uma página do clube
 const rota = () => (location.hash.replace(/^#\/?/, '') || 'painel').split('/')[0];
 function abas() {
   const c = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ['material', 'Material'], ['tarefas', 'Checklist']];
-  return papel() === 'director' ? [c[0], c[1], ['pais', 'Pais'], c[2], c[3]] : [['visao', 'Clubes'], ...c];
+  return papel() === 'director' ? [c[0], c[1], ['pais', 'Pais'], c[2], c[3]] : [['painel', 'Painel'], ['visao', 'Clubes']];
 }
 function render() {
   if (!S.me) return;
@@ -83,18 +85,13 @@ function render() {
   $('#app').innerHTML = `${navigator.onLine ? '' : '<div class="off">Sem internet</div>'}
   <header class="top"><img class="logo" src="/logo.png" alt=""><div class="tt" id="eu" style="cursor:pointer"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
    <button class="ib" id="bt" title="Tema">${escuro ? IC.sol : IC.lua}</button><button class="sair" id="bs">${IC.sair}<span>Sair</span></button></header>
-  <div class="wrap"><nav class="side">${abas().map(([k, n]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
-  <nav class="nav">${abas().map(([k, n]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}</nav>`;
+  <div class="wrap"><nav class="side">${abas().map(([k, n]) => `<a href="#/${k}" class="${r === k || (r === 'clube' && k === 'visao') ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
+  <nav class="nav">${abas().map(([k, n]) => `<a href="#/${k}" class="${r === k || (r === 'clube' && k === 'visao') ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}</nav>`;
   $('#bs').onclick = () => sair(); $('#eu').onclick = () => mSenha(false);
   $('#bt').onclick = () => { st.set('cs_tema', escuro ? 'claro' : 'escuro'); tema(); render(); };
-  const main = $('#main'), coord = papel() !== 'director', deClube = ['painel', 'pessoas', 'material', 'tarefas', 'pais'].includes(r);
-  if (coord && deClube && !S.clube) { escolherClube(main); scrollTo(0, 0); return; }
-  (V[r] || V.painel)(main).then(() => {
-    if (!coord || !deClube || !S.clube) return;
-    const c = S.clubes.find((x) => x.id === S.clube) || {};
-    main.insertAdjacentHTML('afterbegin', `<div class="clubebar noprint"><span>📍 <b>${esc(c.nome || '')}</b> <small>${esc(c.regiao || '')}${pode() ? '' : ' · só leitura'}</small></span><button class="btn sm sec" id="tc">Trocar</button></div>`);
-    $('#tc').onclick = () => modal('<h3>Escolher clube</h3><div id="ec"></div><div class="acts"><button class="btn sec" onclick="fechar()">Fechar</button></div>', (m) => escolherClube($('#ec', m), true));
-  }).catch((e) => (main.innerHTML = `<div class="alert">${esc(e.message)}</div>`));
+  const main = $('#main');
+  const v = coord() ? (r === 'painel' ? V.geral : r === 'clube' ? V.clube : V[r] || V.geral) : V[r] || V.painel;
+  v(main).catch((e) => (main.innerHTML = `<div class="alert">${esc(e.message)}</div>`));
   scrollTo(0, 0);
 }
 addEventListener('hashchange', render); addEventListener('online', render); addEventListener('offline', render);
@@ -104,20 +101,6 @@ addEventListener('hashchange', render); addEventListener('online', render); addE
     if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return; const a = abas().map((t) => t[0]), i = a.indexOf(rota()), j = i + (dx < 0 ? 1 : -1); if (i >= 0 && a[j]) location.hash = '#/' + a[j]; }, { passive: true });
 })();
 
-// pesquisa de clube (Regional / Missão) — substitui a lista do topo
-function escolherClube(el, emJanela) {
-  let q = '';
-  el.innerHTML = `${emJanela ? '' : '<h1>Escolha um clube</h1><p class="sub">Escreva parte do nome do clube, da igreja ou da região.</p>'}<input type="search" id="qc" placeholder="Procurar clube…" autocomplete="off"><div class="list" id="rc" style="margin-top:10px"></div>`;
-  const desenhar = () => {
-    const n = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const f = S.clubes.filter((c) => !q || n(c.nome + ' ' + c.igreja + ' ' + c.regiao).includes(n(q)));
-    $('#rc', el).innerHTML = f.slice(0, 25).map((c) => `<div class="row" data-c="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}</small></div></div>`).join('')
-      + (f.length > 25 ? `<p class="sub">+ ${f.length - 25} clubes. Escreva mais letras para encontrar.</p>` : '') + (f.length ? '' : '<p class="sub">Nenhum clube encontrado.</p>');
-    $('#rc', el).querySelectorAll('[data-c]').forEach((r) => (r.onclick = () => { S.clube = +r.dataset.c; st.set('cs_clube', S.clube); fechar(); if (!['painel', 'pessoas', 'material', 'tarefas', 'pais'].includes(rota())) location.hash = '#/painel'; else render(); }));
-  };
-  $('#qc', el).oninput = (e) => { q = e.target.value; desenhar(); };
-  desenhar(); if (innerWidth > 700) $('#qc', el).focus();
-}
 function modal(h, fn) { const m = $('#modal'); m.innerHTML = `<div class="sheet">${h}</div>`; m.hidden = false; m.onclick = (e) => { if (e.target === m) fechar(); }; fn && fn(m); }
 function fechar() { $('#modal').hidden = true; $('#modal').innerHTML = ''; }
 const ro = () => '';
@@ -130,17 +113,17 @@ V.painel = async (el) => {
   if (!S.clube) return (el.innerHTML = '<div class="empty">Ainda não há clubes.</div>');
   const d = await api('GET', `/c/${S.clube}/painel`), m = d.m, ev = d.evento, f = dias(d.hoje, ev.inicio);
   const txt = `*${ev.nome}*\nClube ${d.clube.nome}\n\n👥 ${m.n} acampantes (${m.dbv} desbravadores, ${m.dir} direcção)\n💰 ${m.pagos} de ${m.n} com tudo pago (${kz(m.recebido)} de ${kz(m.devido)})\n🎒 Material individual ${m.pct_material}%\n📄 Sem autorização: ${m.sem_aut} · Sem ficha médica: ${m.sem_ficha}\n✅ Checklist ${m.feitas}/${m.total}\n⏳ Faltam ${f} dias`;
-  el.innerHTML = `<div class="print-h"><b>${esc(ev.nome)}</b> — ${esc(d.clube.nome)} — ${dt(d.hoje)}</div><h1>${esc(d.clube.nome)}</h1><p class="sub">${esc(d.clube.regiao)}</p>${ro()}
+  el.innerHTML = `<div class="print-h"><b>${esc(ev.nome)}</b> — ${esc(d.clube.nome)} — ${dt(d.hoje)}</div>${coord() ? '' : `<h1>${esc(d.clube.nome)}</h1><p class="sub">${esc(d.clube.regiao)}</p>`}${ro()}
   <div class="card hero"><small>${f >= 0 ? 'Dias até à partida' : 'Campori a decorrer'}</small><div class="big">${Math.max(0, f)}</div><small>${esc(ev.local)} · ${dt(ev.inicio)} a ${dt(ev.fim)}</small>
    <div class="marcos">${[['Cobrar aos membros', ev.prazo_cobranca], ['Pagar transporte', ev.prazo_transporte], ['Partida', ev.inicio]].map(([n, x]) => { const k = dias(d.hoje, x); return `<div class="marco ${k < 0 ? 'feito' : k <= 7 ? 'perto' : ''}"><b>${dt(x)}</b>${n}</div>`; }).join('')}</div></div>
   <h2>Alertas</h2>${m.alertas.length ? m.alertas.map((a) => `<div class="alert">⚠️ ${esc(a)}</div>`).join('') : '<div class="alert ok">✅ Tudo em ordem.</div>'}
   <div class="grid">
-   <a class="card kpi" href="#/pessoas" style="text-decoration:none"><small>Acampantes</small><b>${m.n}</b><i>${m.dbv} dbv · ${m.dir} direcção</i></a>
-   <a class="card kpi ${m.pagos >= m.n && m.n ? 'green' : 'gold'}" href="#/pessoas" style="text-decoration:none"><small>Com tudo pago</small><b>${m.pagos}/${m.n}</b><i>${kz(m.recebido)} de ${kz(m.devido)}</i></a>
+   <a class="card kpi" href="${lk('pessoas')}" style="text-decoration:none"><small>Acampantes</small><b>${m.n}</b><i>${m.dbv} dbv · ${m.dir} direcção</i></a>
+   <a class="card kpi ${m.pagos >= m.n && m.n ? 'green' : 'gold'}" href="${lk('pessoas')}" style="text-decoration:none"><small>Com tudo pago</small><b>${m.pagos}/${m.n}</b><i>${kz(m.recebido)} de ${kz(m.devido)}</i></a>
   </div>
   <div class="card" style="margin-top:12px">${barra('Pagamentos', m.pct_pago)}${barra('Autorizações dos pais', pct(m.dbv - m.sem_aut, m.dbv))}${barra('Fichas médicas', pct(m.n - m.sem_ficha, m.n))}${barra('Material individual', m.pct_material)}${barra('Checklist', pct(m.feitas, m.total))}</div>
-  <p class="sub" style="margin-top:10px">💰 Cada acampante paga: inscrição (${kz(ev.taxa_dbv)} dbv / ${kz(ev.taxa_dir)} direcção) + transporte ${kz(ev.transporte)}${d.contribuicoes.map((k) => ` + ${esc(k.nome)} (${k.valor_dbv === k.valor_dir ? kz(k.valor_dbv) : kz(k.valor_dbv) + ' / ' + kz(k.valor_dir)})`).join('')}.${d.editar ? ' <a href="#/pessoas" id="lc">Contribuições do clube</a>' : ''}</p>
-  ${d.proximas.length ? `<h2>A seguir na checklist</h2><div class="list">${d.proximas.map((t) => { const k = dias(d.hoje, t.prazo); return `<a class="row" href="#/tarefas" style="text-decoration:none"><div class="t"><b>${esc(t.titulo)}</b></div><span class="tag ${k < 0 ? 'no' : k <= 7 ? 'w' : 'b'}">${k < 0 ? 'Atrasada' : dt(t.prazo)}</span></a>`; }).join('')}</div>` : ''}
+  <p class="sub" style="margin-top:10px">💰 Cada acampante paga: inscrição (${kz(ev.taxa_dbv)} dbv / ${kz(ev.taxa_dir)} direcção) + transporte ${kz(ev.transporte)}${d.contribuicoes.map((k) => ` + ${esc(k.nome)} (${k.valor_dbv === k.valor_dir ? kz(k.valor_dbv) : kz(k.valor_dbv) + ' / ' + kz(k.valor_dir)})`).join('')}.${d.editar ? ` <a href="${lk('pessoas')}" id="lc">Contribuições do clube</a>` : ''}</p>
+  ${d.proximas.length ? `<h2>A seguir na checklist</h2><div class="list">${d.proximas.map((t) => { const k = dias(d.hoje, t.prazo); return `<a class="row" href="${lk('tarefas')}" style="text-decoration:none"><div class="t"><b>${esc(t.titulo)}</b></div><span class="tag ${k < 0 ? 'no' : k <= 7 ? 'w' : 'b'}">${k < 0 ? 'Atrasada' : dt(t.prazo)}</span></a>`; }).join('')}</div>` : ''}
   <div class="acts noprint"><a class="btn green" target="_blank" rel="noopener" href="${wa('', txt)}">${IC.wa} Partilhar no WhatsApp</a></div>`;
   if ($('#lc')) $('#lc').onclick = (e) => { e.preventDefault(); mContrib(); };
 };
@@ -379,28 +362,84 @@ V.tarefas = async (el) => {
 };
 
 // ---------- CLUBES (Regional / Missão) ----------
-let busca = '', reg = '';
+let busca = '', reg = '', alertaF = '';
+const ALERTAS = [['sem_director', 'Sem director com acesso', (c) => !c.dir_id], ['sem_acampantes', 'Sem acampantes', (c) => !c.n],
+  ['sem_adultos', 'Sem adultos inscritos', (c) => c.n && !c.dir], ['racio', 'Poucos adultos para os desbravadores', (c) => c.alertas.some((a) => a.startsWith('Mais de'))],
+  ['atrasadas', 'Com tarefas atrasadas', (c) => c.atrasadas > 0], ['pagar', 'Com pagamentos em falta (após o prazo)', (c) => c.alertas.some((a) => a.includes('por pagar'))],
+  ['aut', 'Com autorizações em falta (após o prazo)', (c) => c.alertas.some((a) => a.includes('autorização'))], ['pedidos', 'Com pedidos à espera', (c) => c.pedidos > 0]];
+const verClubes = (r, a) => { reg = r || ''; alertaF = a || ''; busca = ''; location.hash = '#/visao'; };
 V.visao = async (el) => {
   if (papel() === 'director') return V.painel(el);
   const ls = await api('GET', '/visao'), ev = S.me.evento, M = papel() === 'missao';
-  const f = ls.filter((c) => (!reg || c.regiao === reg) && (!busca || c.nome.toLowerCase().includes(busca.toLowerCase()))).sort((a, b) => b.alertas.length - a.alertas.length || a.nome.localeCompare(b.nome));
+  const nrm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), AF = ALERTAS.find((x) => x[0] === alertaF);
+  const f = ls.filter((c) => (!reg || c.regiao === reg) && (!AF || AF[2](c)) && (!busca || nrm(c.nome + ' ' + c.regiao + ' ' + (c.dir_nome || '')).includes(nrm(busca)))).sort((a, b) => b.alertas.length - a.alertas.length || a.nome.localeCompare(b.nome));
   const s = (k) => f.reduce((a, c) => a + c[k], 0), npd = ls.reduce((a, c) => a + c.pedidos, 0);
   el.innerHTML = `${npd ? `<div class="alert" style="cursor:pointer" id="vp">📨 <b>${npd} pedido(s)</b> de inclusão/retirada à espera de resposta. Toque para ver.</div>` : ''}<h1>Clubes</h1><p class="sub">${M ? 'Toda a Missão' : 'Região ' + esc(S.me.regiao?.nome)} · ${f.length} clubes · faltam ${dias(S.me.hoje, ev.inicio)} dias</p>
   <div class="grid"><div class="card kpi"><small>Acampantes</small><b>${s('n')}</b><i>${s('dbv')} dbv · ${s('dir')} direcção</i></div><div class="card kpi gold"><small>Pago</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))}</i></div>
    <div class="card kpi"><small>Checklist</small><b>${pct(s('feitas'), s('total'))}%</b></div><div class="card kpi red"><small>Clubes com alertas</small><b>${f.filter((c) => c.alertas.length).length}</b></div></div>
-  <div class="tools" style="margin-top:12px"><input type="search" id="bu" placeholder="Procurar clube…" value="${esc(busca)}">${M ? `<select id="rg"><option value="">Todas as regiões</option>${[...new Set(ls.map((c) => c.regiao))].map((r) => `<option ${r === reg ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}</div>
+  <div class="tools" style="margin-top:12px"><input type="search" id="bu" placeholder="Procurar clube, região ou director…" value="${esc(busca)}"></div>
+  ${reg || AF ? `<div class="chips">${reg ? `<button class="on" id="xr">Região: ${esc(reg)} ✕</button>` : ''}${AF ? `<button class="on" id="xa">${esc(AF[1])} ✕</button>` : ''}</div>` : ''}
   <div class="list">${f.map((c) => `<div class="row" data-id="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} acamp. · ${c.dir_nome ? esc(c.dir_nome) : '<span style="color:var(--red)">sem director</span>'}</small>
     <div style="display:flex;gap:10px;margin-top:6px"><div style="flex:1"><small style="color:var(--mut)">Pago ${c.pct_pago}%</small><div class="bar ${c.pct_pago < 40 ? 'r' : c.pct_pago < 80 ? 'o' : ''}"><span style="width:${c.pct_pago}%"></span></div></div><div style="flex:1"><small style="color:var(--mut)">Checklist ${pct(c.feitas, c.total)}%</small><div class="bar ${pct(c.feitas, c.total) < 40 ? 'r' : 'o'}"><span style="width:${pct(c.feitas, c.total)}%"></span></div></div></div>
     <div>${c.pedidos ? `<span class="tag w">📨 ${c.pedidos} pedido(s)</span>` : ''}${c.alertas.map((a) => `<span class="tag no">${esc(a)}</span>`).join('')}</div></div>
     <div class="v">${c.dir_tel ? `<a class="tag ok" target="_blank" rel="noopener" href="${wa(c.dir_tel, `Maranata, ${c.dir_nome.split(' ')[0]}! Sobre o Campori do clube ${c.nome}: `)}">WhatsApp</a>` : ''}${M ? `<br><button class="tag b" data-dir="${c.id}">Acesso</button>` : ''}</div></div>`).join('') || '<div class="empty">Sem clubes.</div>'}</div>
   <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button><button class="btn sec" id="pds">📨 Pedidos</button>${M ? '<button class="btn gold" id="im">Importar clubes</button><button class="btn gold" id="ia">Importar acampantes (todos os clubes)</button><button class="btn sec" id="rgs">Regionais</button>' : ''}</div>`;
   $('#bu').oninput = (e) => { busca = e.target.value; clearTimeout(el._t); el._t = setTimeout(() => { render(); setTimeout(() => { const b = $('#bu'); b.focus(); b.setSelectionRange(99, 99); }); }, 350); };
-  if ($('#rg')) $('#rg').onchange = (e) => { reg = e.target.value; render(); };
+  if ($('#xr')) $('#xr').onclick = () => { reg = ''; render(); };
+  if ($('#xa')) $('#xa').onclick = () => { alertaF = ''; render(); };
   $('#ex').onclick = () => baixar('clubes_campori.csv', csv(['Região', 'Clube', 'Director', 'Telefone', 'Acampantes', 'Desbravadores', 'Direcção', 'Tudo pago', '% pago', 'Sem autorização', 'Sem ficha', '% material', 'Checklist', 'Alertas'], f.map((c) => [c.regiao, c.nome, c.dir_nome, c.dir_tel, c.n, c.dbv, c.dir, c.pagos, c.pct_pago, c.sem_aut, c.sem_ficha, c.pct_material, `${c.feitas}/${c.total}`, c.alertas.join(' | ')])));
-  el.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = (e) => { if (e.target.closest('a,button')) return; S.clube = +r.dataset.id; st.set('cs_clube', S.clube); location.hash = '#/painel'; }));
+  el.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = (e) => { if (e.target.closest('a,button')) return; S.clube = +r.dataset.id; st.set('cs_clube', S.clube); location.hash = '#/clube/painel'; }));
   el.querySelectorAll('[data-dir]').forEach((b) => (b.onclick = () => mAcesso(ls.find((c) => c.id === +b.dataset.dir))));
   if (M) { $('#im').onclick = mImportar; $('#rgs').onclick = mRegionais; $('#ia').onclick = mImportarTodos; }
   $('#pds').onclick = mPedidos; if ($('#vp')) $('#vp').onclick = mPedidos;
+};
+// página de um clube, aberta a partir da lista
+V.clube = async (el) => {
+  const sub = location.hash.split('/')[2] || 'painel', c = S.clubes.find((x) => x.id === S.clube);
+  if (!c) { location.hash = '#/visao'; return; }
+  const T = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ['material', 'Material'], ['tarefas', 'Checklist']];
+  el.innerHTML = `<p class="sub noprint" style="margin:0 0 6px"><a href="#/visao">← Clubes</a></p><h1>${esc(c.nome)}</h1><p class="sub">${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}${pode() ? '' : ' · só leitura'}</p>
+   <div class="chips noprint">${T.map(([k, n]) => `<button data-s="${k}" class="${sub === k ? 'on' : ''}">${n}</button>`).join('')}</div><div id="sv"></div>`;
+  el.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => (location.hash = '#/clube/' + b.dataset.s)));
+  const sv = $('#sv', el);
+  await (V[sub] || V.painel)(sv);
+  const fb = sv.querySelector('.fab'); if (fb) el.append(fb);
+  const h = sv.querySelector('h1'); if (h && sub !== 'painel') h.remove();
+};
+// painel geral da Missão / da região
+V.geral = async (el) => {
+  const ls = await api('GET', '/visao'), ev = S.me.evento, h = S.me.hoje, M = missao(), f = dias(h, ev.inicio);
+  const s = (k, l = ls) => l.reduce((a, c) => a + (c[k] || 0), 0);
+  const n = s('n'), dbv = s('dbv'), dir = s('dir'), npd = s('pedidos');
+  const regs = {}; for (const c of ls) (regs[c.regiao] ||= []).push(c);
+  const att = ALERTAS.map(([k, t, fn]) => [k, t, ls.filter(fn).length]).filter((x) => x[2]);
+  const top = [...ls].sort((a, b) => b.n - a.n).slice(0, 5);
+  el.innerHTML = `<div class="print-h"><b>${esc(ev.nome)}</b> — Painel geral — ${dt(h)}</div>
+  ${npd ? `<div class="alert" style="cursor:pointer" id="vp">📨 <b>${npd} pedido(s)</b> de inclusão/retirada à espera de resposta.</div>` : ''}
+  <h1>${M ? 'Missão Sul de Luanda e Cabinda' : 'Região ' + esc(S.me.regiao?.nome || '')}</h1><p class="sub">${esc(ev.nome)}</p>
+  <div class="card hero"><small>${f >= 0 ? 'Dias até à partida' : 'Campori a decorrer'}</small><div class="big">${Math.max(0, f)}</div><small>${esc(ev.local)} · ${dt(ev.inicio)} a ${dt(ev.fim)}</small>
+   <div class="marcos">${[['Cobrança nos clubes', ev.prazo_cobranca], ['Pagamento do transporte', ev.prazo_transporte], ['Partida', ev.inicio]].map(([t, x]) => { const k = dias(h, x); return `<div class="marco ${k < 0 ? 'feito' : k <= 7 ? 'perto' : ''}"><b>${dt(x)}</b>${t}</div>`; }).join('')}</div></div>
+  <div class="grid" style="margin-top:12px">
+   <div class="card kpi"><small>Acampantes</small><b>${n.toLocaleString('pt-PT')}</b><i>${dbv} desbravadores · ${dir} direcção</i></div>
+   <div class="card kpi"><small>Clubes</small><b>${ls.length}</b><i>${ls.filter((c) => c.dir_id).length} com director na app</i></div>
+   <div class="card kpi ${pct(s('recebido'), s('devido')) >= 80 ? 'green' : 'gold'}"><small>Pagamentos</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))} de ${kz(s('devido'))}</i></div>
+   <div class="card kpi"><small>Com tudo pago</small><b>${s('pagos')}</b><i>de ${n} acampantes</i></div>
+  </div>
+  <div class="card" style="margin-top:12px">${barra('Pagamentos', pct(s('recebido'), s('devido')))}${barra('Autorizações dos pais', pct(dbv - s('sem_aut'), dbv))}${barra('Fichas médicas', pct(n - s('sem_ficha'), n))}${barra('Material individual (média)', ls.length ? Math.round(s('pct_material') / ls.length) : 0)}${barra('Checklist dos clubes', pct(s('feitas'), s('total')))}${barra('Clubes com director na app', pct(ls.filter((c) => c.dir_id).length, ls.length))}</div>
+  <h2>Pontos de atenção</h2>
+  <div class="list">${att.map(([k, t, q]) => `<div class="row" data-a="${k}"><div class="t"><b>${esc(t)}</b></div><span class="tag ${['sem_adultos', 'racio', 'pedidos'].includes(k) ? 'no' : 'w'}">${q} clube${q > 1 ? 's' : ''}</span></div>`).join('') || '<div class="alert ok">✅ Nenhum ponto de atenção.</div>'}</div>
+  <h2>${M ? 'Por região' : 'Clubes da região'}</h2>
+  ${M ? `<div class="list">${Object.entries(regs).sort((a, b) => s('n', b[1]) - s('n', a[1])).map(([r, cs]) => { const pp = pct(s('recebido', cs), s('devido', cs)), pc = pct(s('feitas', cs), s('total', cs));
+    return `<div class="row" data-r="${esc(r)}"><div class="t"><b>${esc(r)}</b><small>${cs.length} clubes · ${s('n', cs)} acampantes (${s('dbv', cs)}/${s('dir', cs)}) · ${cs.filter((c) => c.dir_id).length} directores na app</small>
+     <div style="display:flex;gap:10px;margin-top:6px"><div style="flex:1"><small style="color:var(--mut)">Pago ${pp}%</small><div class="bar ${pp < 40 ? 'r' : pp < 80 ? 'o' : ''}"><span style="width:${pp}%"></span></div></div><div style="flex:1"><small style="color:var(--mut)">Checklist ${pc}%</small><div class="bar ${pc < 40 ? 'r' : pc < 80 ? 'o' : ''}"><span style="width:${pc}%"></span></div></div></div></div></div>`; }).join('')}</div>`
+    : `<div class="acts" style="margin-top:0"><a class="btn sec" href="#/visao">Ver os ${ls.length} clubes</a></div>`}
+  <h2>Clubes com mais acampantes</h2>
+  <div class="list">${top.map((c, i) => `<div class="row" data-id="${c.id}"><span class="chk" style="border:0;font-weight:800">${i + 1}</span><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)}</small></div><b>${c.n}</b></div>`).join('')}</div>
+  <div class="acts noprint"><button class="btn sec" onclick="print()">${IC.print} Imprimir / PDF</button></div>`;
+  el.querySelectorAll('[data-a]').forEach((r) => (r.onclick = () => verClubes('', r.dataset.a)));
+  el.querySelectorAll('[data-r]').forEach((r) => (r.onclick = () => verClubes(r.dataset.r, '')));
+  el.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => { S.clube = +r.dataset.id; st.set('cs_clube', S.clube); location.hash = '#/clube/painel'; }));
+  if ($('#vp')) $('#vp').onclick = mPedidos;
 };
 async function mPedidos() {
   const ps = await api('GET', '/pedidos'), M = missao();
