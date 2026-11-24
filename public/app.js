@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '3.1';
+const VERSAO = '4.2';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -13,6 +13,8 @@ const IC = {
   lua: I('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
   sol: I('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
   mais: I('<path d="M12 5v14M5 12h14"/>'),
+  documentos: I('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>'),
+  ficha: I('<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="9" r="2.5"/><path d="M8 17c.6-2 2.1-3 4-3s3.4 1 4 3"/>'),
   secretaria: I('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3M9 10h6M9 14h6M9 18h3"/>'),
   avisos: I('<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15 9a3 3 0 0 1 0 6M18 6a7 7 0 0 1 0 12"/>'),
   sino: I('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
@@ -80,24 +82,26 @@ const V = {};
 const coord = () => S.me && papel() !== 'director';
 const lk = (x) => (coord() ? '#/clube/' + x : '#/' + x); // ligação para uma página do clube
 const rota = () => (location.hash.replace(/^#\/?/, '') || 'painel').split('/')[0];
-function abas() {
-  const c = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ['material', 'Material'], ['tarefas', 'Checklist']];
-  return papel() === 'director' ? [c[0], c[1], ['pais', 'Pais'], c[2], c[3]] : [['painel', 'Painel'], ['visao', 'Clubes'], ['secretaria', 'Secretaria'], ['avisos', 'Avisos']];
+function abas() { // o Painel fica sempre ao centro da barra de baixo
+  return papel() === 'director'
+    ? [['pessoas', 'Acampantes'], ['pais', 'Pais'], ['painel', 'Painel'], ['secretaria', 'Secretaria'], ['mais', 'Mais']]
+    : [['visao', 'Clubes'], ['secretaria', 'Secretaria'], ['painel', 'Painel'], ['avisos', 'Avisos'], ['documentos', 'Documentos']];
 }
+const naBarra = (r, k) => r === k || (r === 'clube' && k === 'visao') || (papel() === 'director' && ['material', 'tarefas', 'avisos', 'documentos'].includes(r) && k === 'mais');
 function render() {
   if (!S.me) return;
   const r = rota(), u = S.me.user, escuro = document.documentElement.dataset.tema === 'escuro';
   $('#app').innerHTML = `${navigator.onLine ? '' : '<div class="off">Sem internet</div>'}
   <header class="top"><img class="logo" src="/logo.png" alt=""><div class="tt" id="eu" style="cursor:pointer"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
    ${coord() ? `<button class="ib" id="lp" title="Procurar">${IC.lupa}</button>` : `<button class="ib" id="sn" title="Avisos">${IC.sino}${S.naoLidos ? `<span class="dot">${S.naoLidos}</span>` : ''}</button>`}<button class="ib" id="bt" title="Tema">${escuro ? IC.sol : IC.lua}</button><button class="sair" id="bs">${IC.sair}<span>Sair</span></button></header>
-  <div class="wrap"><nav class="side">${abas().map(([k, n]) => `<a href="#/${k}" class="${r === k || (r === 'clube' && k === 'visao') ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
-  <nav class="nav">${abas().map(([k, n]) => `<a href="#/${k}" class="${r === k || (r === 'clube' && k === 'visao') ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}</nav>`;
+  <div class="wrap"><nav class="side">${[...abas()].sort((a, b) => (b[0] === 'painel') - (a[0] === 'painel')).map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
+  <nav class="nav">${abas().map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}${k === 'painel' ? ' centro' : ''}">${k === 'painel' ? `<span class="bola">${IC[k]}</span>` : IC[k]}${n}</a>`).join('')}</nav>`;
   $('#bs').onclick = () => sair(); $('#eu').onclick = () => mSenha(false);
   if ($('#lp')) $('#lp').onclick = mProcurar;
   if ($('#sn')) $('#sn').onclick = () => (location.hash = '#/avisos');
   $('#bt').onclick = () => { st.set('cs_tema', escuro ? 'claro' : 'escuro'); tema(); render(); };
   const main = $('#main');
-  const v = coord() ? (r === 'painel' ? V.geral : r === 'clube' ? V.clube : V[r] || V.geral) : V[r] || V.painel;
+  const v = coord() ? (r === 'painel' ? V.geral : r === 'clube' ? V.clube : V[r] || V.geral) : r === 'secretaria' ? V.secClube : V[r] || V.painel;
   v(main).catch((e) => (main.innerHTML = `<div class="alert">${esc(e.message)}</div>`));
   scrollTo(0, 0);
 }
@@ -128,7 +132,7 @@ V.painel = async (el) => {
    <a class="card kpi" href="${lk('pessoas')}" style="text-decoration:none"><small>Acampantes</small><b>${m.n}</b><i>${m.dbv} dbv · ${m.dir} direcção</i></a>
    <a class="card kpi ${m.pagos >= m.n && m.n ? 'green' : 'gold'}" href="${lk('pessoas')}" style="text-decoration:none"><small>Com tudo pago</small><b>${m.pagos}/${m.n}</b><i>${kz(m.recebido)} de ${kz(m.devido)}</i></a>
   </div>
-  <div class="card" style="margin-top:12px">${barra('Pagamentos', m.pct_pago)}${barra('Autorizações dos pais', pct(m.dbv - m.sem_aut, m.dbv))}${barra('Fichas médicas', pct(m.n - m.sem_ficha, m.n))}${barra('Material individual', m.pct_material)}${barra('Checklist', pct(m.feitas, m.total))}</div>
+  <div class="card" style="margin-top:12px">${barra('Pagamentos', m.pct_pago)}${barra('Autorizações dos pais', pct(m.dbv - m.sem_aut, m.dbv))}${barra('Fichas médicas', pct(m.n - m.sem_ficha, m.n))}${barra('Fichas individuais completas', pct(m.fichas, m.n))}${barra('Material individual', m.pct_material)}${barra('Checklist', pct(m.feitas, m.total))}</div>
   <p class="sub" style="margin-top:10px">💰 Cada acampante paga: inscrição (${kz(ev.taxa_dbv)} dbv / ${kz(ev.taxa_dir)} direcção) + transporte ${kz(ev.transporte)}${d.contribuicoes.map((k) => ` + ${esc(k.nome)} (${k.valor_dbv === k.valor_dir ? kz(k.valor_dbv) : kz(k.valor_dbv) + ' / ' + kz(k.valor_dir)})`).join('')}.${d.editar ? ` <a href="${lk('pessoas')}" id="lc">Contribuições do clube</a>` : ''}</p>
   ${d.proximas.length ? `<h2>A seguir na checklist</h2><div class="list">${d.proximas.map((t) => { const k = dias(d.hoje, t.prazo); return `<a class="row" href="${lk('tarefas')}" style="text-decoration:none"><div class="t"><b>${esc(t.titulo)}</b></div><span class="tag ${k < 0 ? 'no' : k <= 7 ? 'w' : 'b'}">${k < 0 ? 'Atrasada' : dt(t.prazo)}</span></a>`; }).join('')}</div>` : ''}
   <div class="acts noprint"><a class="btn green" target="_blank" rel="noopener" href="${wa('', txt)}">${IC.wa} Partilhar no WhatsApp</a></div>`;
@@ -185,13 +189,14 @@ async function mPessoa(p, ks) {
    <label>Material que já tem</label><div class="fl">${its.map((i) => ck('itens', i.nome, p.itens.includes(i.id), i.id)).join('')}</div>
    <label>Observações (alergias, medicação…)</label><textarea name="obs">${esc(p.obs)}</textarea>
    <div class="acts">${p.id && missao() ? '<button type="button" class="btn red" id="del">Retirar</button>' : ''}${p.id && papel() === 'director' ? '<button type="button" class="btn sec" id="pr">Pedir para retirar</button>' : ''}<button type="button" class="btn sec" onclick="fechar()">Cancelar</button><button class="btn">Guardar</button></div></form>`, (m) => {
-    if ($('#del', m)) $('#del', m).onclick = async () => { if (!confirm('Retirar ' + p.nome + ' da lista do Campori?')) return; await api('DELETE', `/c/${S.clube}/participantes/${p.id}`); fechar(); render(); };
+    if ($('#del', m)) $('#del', m).onclick = async () => { if (!confirm(`Retirar ${p.nome}? O total de inscritos do clube desce 1.`)) return; try { await api('DELETE', `/c/${S.clube}/participantes/${p.id}`); fechar(); toast('Retirado'); render(); } catch (er) { toast(er.message, 1); } };
     if ($('#pr', m)) $('#pr', m).onclick = () => mPedido({ tipo: 'retirar', participante_id: p.id, nome: p.nome });
     $('#f', m).onsubmit = async (e) => { e.preventDefault(); const f = e.target;
       const b = { nome: f.nome.value, nascimento: f.nascimento.value, ...(missao() ? { categoria: f.categoria.value } : {}), telefone: f.telefone.value, encarregado: f.encarregado.value, obs: f.obs.value,
         pagas: [...f.querySelectorAll('[name=pagas]:checked')].map((x) => +x.value), itens: [...f.querySelectorAll('[name=itens]:checked')].map((x) => +x.value) };
       ['pago_inscricao', 'pago_transporte', 'autorizacao', 'ficha_medica'].forEach((k) => (b[k] = f[k].checked ? 1 : 0));
-      try { await api(p.id ? 'PUT' : 'POST', `/c/${S.clube}/participantes${p.id ? '/' + p.id : ''}`, b); fechar(); toast('Guardado'); render(); } catch (er) { toast(er.message, 1); } };
+      const gravar = async () => { try { await api(p.id ? 'PUT' : 'POST', `/c/${S.clube}/participantes${p.id ? '/' + p.id : ''}`, b); fechar(); toast('Guardado'); render(); } catch (er) { toast(er.message, 1); } };
+      gravar(); };
   });
 }
 function mPedido(x) {
@@ -283,7 +288,8 @@ V.pais = async (el) => {
   if (ed) fab(() => mModelo({ titulo: '', texto: 'Saudações, prezado(a) {encarregado}.\n\n\n\n{director}\nClube {clube}', filtro: 'todos' }));
 };
 function vEnviar(el, m, ctx, ed) {
-  let f = st.get('cs_f' + m.id) || m.filtro;
+  let f = st.get('cs_f' + m.id) || m.filtro; const sel = new Set();
+  const regista = (pid) => { ctx.en.push({ modelo_id: m.id, participante_id: pid, em: new Date(Date.now() + 3600e3).toISOString().replace('T', ' ').slice(0, 19) }); api('POST', `/c/${S.clube}/envios`, { participante_id: pid, modelo_id: m.id }).catch(() => {}); setTimeout(() => desenhar(), 300); };
   const desenhar = () => {
     if (f !== 'nenviados' && !FILTROS[f]) f = 'todos';
     const quando = (p) => ctx.en.filter((e) => e.modelo_id === m.id && e.participante_id === p.id).map((e) => e.em).sort().pop();
@@ -295,20 +301,43 @@ function vEnviar(el, m, ctx, ed) {
     ${grupo ? `<div class="acts" style="margin:0 0 12px"><a class="btn green" target="_blank" rel="noopener" href="${wa('', preencher(m.texto, ctx.ps[0] || { pagas: [], itens: [] }, ctx))}">${IC.wa} Enviar ao grupo dos pais</a></div>` : ''}
     <div class="chips">${[...Object.entries(FILTROS).map(([k, [n]]) => [k, n]), ['nenviados', 'Ainda não enviados']].map(([k, n]) => `<button data-f="${k}" class="${f === k ? 'on' : ''}">${n}</button>`).join('')}</div>
     <p class="sub">${lst.length} destinatário(s) · ${lst.filter(quando).length} já enviados</p>
-    <div class="list">${lst.map((p) => { const q = quando(p); return `<div class="row" data-p="${p.id}"><div class="t"><b>${esc(p.encarregado || 'Encarregado de ' + p.nome.split(' ')[0])}</b><small>${esc(p.nome)} · ${p.telefone ? esc(p.telefone) : '<span style="color:var(--red)">sem telefone</span>'}</small>
+    ${ed && lst.some((p) => p.telefone) ? `<div class="selbar"><label class="ck" style="margin:0"><input type="checkbox" id="st" ${lst.filter((p) => p.telefone).every((p) => sel.has(p.id)) && sel.size ? 'checked' : ''}> Seleccionar todos</label>
+      <button class="btn green sm" id="es" ${sel.size ? '' : 'disabled'}>${IC.wa} Enviar a ${sel.size} seleccionado(s)</button></div>` : ''}
+    <div class="list">${lst.map((p) => { const q = quando(p); return `<div class="row" data-p="${p.id}">${ed && p.telefone ? `<input type="checkbox" class="sel" data-s="${p.id}" ${sel.has(p.id) ? 'checked' : ''}>` : ''}<div class="t"><b>${esc(p.encarregado || 'Encarregado de ' + p.nome.split(' ')[0])}</b><small>${esc(p.nome)} · ${p.telefone ? esc(p.telefone) : '<span style="color:var(--red)">sem telefone</span>'}</small>
       ${q ? `<div><span class="tag ok">✓ Enviada ${dt(q.slice(0, 10))} ${q.slice(11, 16)}</span></div>` : ''}</div>
       ${ed && p.telefone ? `<a class="btn green sm" data-wa="${p.id}" target="_blank" rel="noopener" href="${wa(p.telefone, preencher(m.texto, p, ctx))}">${IC.wa} Enviar</a>` : ''}</div>`; }).join('') || '<div class="empty">Ninguém neste filtro 🎉</div>'}</div>`;
     el.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { f = b.dataset.f; st.set('cs_f' + m.id, f); desenhar(); }));
     if ($('#em')) $('#em').onclick = (e) => { e.preventDefault(); mModelo(m); };
-    const regista = (pid) => { ctx.en.push({ modelo_id: m.id, participante_id: pid, em: new Date(Date.now() + 3600e3).toISOString().replace('T', ' ').slice(0, 19) }); api('POST', `/c/${S.clube}/envios`, { participante_id: pid, modelo_id: m.id }).catch(() => {}); setTimeout(desenhar, 300); };
     el.querySelectorAll('[data-wa]').forEach((a) => (a.onclick = (e) => { e.stopPropagation(); regista(+a.dataset.wa); }));
-    if (ed) el.querySelectorAll('.row[data-p]').forEach((r) => (r.onclick = (e) => { if (e.target.closest('a')) return; const p = ctx.ps.find((x) => x.id === +r.dataset.p);
+    el.querySelectorAll('[data-s]').forEach((c) => (c.onclick = (e) => { e.stopPropagation(); c.checked ? sel.add(+c.dataset.s) : sel.delete(+c.dataset.s); desenhar(); }));
+    if ($('#st', el)) $('#st', el).onchange = (e) => { lst.filter((p) => p.telefone).forEach((p) => (e.target.checked ? sel.add(p.id) : sel.delete(p.id))); desenhar(); };
+    if ($('#es', el)) $('#es', el).onclick = () => serie(lst.filter((p) => sel.has(p.id)));
+    if (ed) el.querySelectorAll('.row[data-p]').forEach((r) => (r.onclick = (e) => { if (e.target.closest('a,input')) return; const p = ctx.ps.find((x) => x.id === +r.dataset.p);
       modal(`<h3>Mensagem para ${esc(p.encarregado || 'o encarregado de ' + p.nome)}</h3><p class="sub">Pode alterar o texto só para esta pessoa.</p><textarea id="tx" style="min-height:320px">${esc(preencher(m.texto, p, ctx))}</textarea>
         <label>Telefone</label><input id="tl" inputmode="tel" value="${esc(p.telefone)}">
         <div class="acts"><button class="btn sec" onclick="fechar()">Cancelar</button><a class="btn green" id="go" target="_blank" rel="noopener" href="#">${IC.wa} Abrir no WhatsApp</a></div>`, (mm) => {
           const upd = () => ($('#go', mm).href = wa($('#tl', mm).value, $('#tx', mm).value)); upd(); $('#tx', mm).oninput = upd; $('#tl', mm).oninput = upd;
           $('#go', mm).onclick = () => { if (!$('#tl', mm).value.trim()) { toast('Indique o telefone', 1); return false; } fechar(); regista(p.id); };
         }); }));
+  };
+  // envio em série: um toque por pai, a app passa sozinha ao seguinte
+  const serie = (fila) => {
+    let i = 0, feitos = 0;
+    const passo = () => {
+      if (i >= fila.length) { modal(`<h3>Envio concluído ✅</h3><p>Mensagem aberta para <b>${feitos}</b> de ${fila.length} encarregados.</p><div class="acts"><button class="btn" onclick="fechar()">Fechar</button></div>`); sel.clear(); desenhar(); return; }
+      const p = fila[i], txt = preencher(m.texto, p, ctx);
+      modal(`<h3>Envio em série · ${i + 1} de ${fila.length}</h3><div class="bar" style="margin:6px 0 12px"><span style="width:${pct(i, fila.length)}%"></span></div>
+        <p style="margin:0"><b>${esc(p.encarregado || 'Encarregado de ' + p.nome)}</b><br><small style="color:var(--mut)">${esc(p.nome)} · ${esc(p.telefone)}</small></p>
+        <div class="card" style="white-space:pre-wrap;font-size:13px;max-height:38vh;overflow:auto;margin-top:10px">${esc(txt)}</div>
+        <p class="sub" style="margin-top:8px">Toque no botão verde, envie no WhatsApp e volte a esta página: aparece logo o encarregado seguinte.</p>
+        <div class="acts"><button class="btn sec" id="sp">Parar</button><button class="btn sec" id="sk">Saltar</button><a class="btn green" id="sg" target="_blank" rel="noopener" href="${wa(p.telefone, txt)}">${IC.wa} Enviar e seguir</a></div>`, (mm) => {
+        mm.onclick = null;
+        $('#sp', mm).onclick = () => { fechar(); sel.clear(); desenhar(); };
+        $('#sk', mm).onclick = () => { i++; passo(); };
+        $('#sg', mm).onclick = () => { regista(p.id); feitos++; i++; setTimeout(passo, 400); };
+      });
+    };
+    passo();
   };
   desenhar();
 }
@@ -376,7 +405,9 @@ const ALERTAS = [['sem_director', 'Sem director com acesso', (c) => !c.dir_id], 
   ['atrasadas', 'Com tarefas atrasadas', (c) => c.atrasadas > 0], ['pagar', 'Com pagamentos em falta (após o prazo)', (c) => c.alertas.some((a) => a.includes('por pagar'))],
   ['aut', 'Com autorizações em falta (após o prazo)', (c) => c.alertas.some((a) => a.includes('autorização'))], ['pedidos', 'Com pedidos à espera', (c) => c.pedidos > 0]];
 // inscritos oficiais (com e sem nome) vs. pessoas com nome na app
-const oficiais = (ls) => ({ of: ls.reduce((a, c) => a + (c.inscritos_oficial ?? c.n), 0), sem: ls.reduce((a, c) => a + Math.max(0, (c.inscritos_oficial ?? c.n) - c.n), 0) });
+// inscritos de um clube = o maior entre o número oficial e os nomes na app (nomes a mais são inscrições novas)
+const inscritosDe = (c) => Math.max(c.inscritos_oficial ?? 0, c.n), semNomeDe = (c) => Math.max(0, (c.inscritos_oficial ?? 0) - c.n);
+const oficiais = (ls) => ({ of: ls.reduce((a, c) => a + inscritosDe(c), 0), sem: ls.reduce((a, c) => a + semNomeDe(c), 0) });
 const verClubes = (r, a) => { reg = r || ''; alertaF = a || ''; busca = ''; location.hash = '#/visao'; };
 V.visao = async (el) => {
   if (papel() === 'director') return V.painel(el);
@@ -390,12 +421,12 @@ V.visao = async (el) => {
   <div class="tools" style="margin-top:12px"><input type="search" id="bu" placeholder="Procurar clube ou director…" value="${esc(busca)}">
    ${M ? `<select id="rg"><option value="">Todas as regiões</option>${[...new Set(ls.map((c) => c.regiao))].sort().map((r) => `<option ${r === reg ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}
    <select id="fa"><option value="">Todos os clubes</option>${ALERTAS.map(([k, t]) => `<option value="${k}" ${alertaF === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
-  <div class="list">${f.map((c) => `<div class="row" data-id="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} acamp. · ${c.dir_nome ? esc(c.dir_nome) : '<span style="color:var(--red)">sem director</span>'}</small>
+  <div class="list">${f.map((c) => `<div class="row" data-id="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} com nome${semNomeDe(c) ? ` · <b style="color:var(--red)">faltam ${semNomeDe(c)} nomes</b> (oficial ${c.inscritos_oficial})` : ''} · ${c.dir_nome ? esc(c.dir_nome) : '<span style="color:var(--red)">sem director</span>'}</small>
     <div style="display:flex;gap:10px;margin-top:6px"><div style="flex:1"><small style="color:var(--mut)">Pago ${c.pct_pago}%</small><div class="bar ${c.pct_pago < 40 ? 'r' : c.pct_pago < 80 ? 'o' : ''}"><span style="width:${c.pct_pago}%"></span></div></div><div style="flex:1"><small style="color:var(--mut)">Checklist ${pct(c.feitas, c.total)}%</small><div class="bar ${pct(c.feitas, c.total) < 40 ? 'r' : 'o'}"><span style="width:${pct(c.feitas, c.total)}%"></span></div></div></div>
     <div>${c.pedidos ? `<span class="tag w">📨 ${c.pedidos} pedido(s)</span>` : ''}${c.alertas.map((a) => `<span class="tag no">${esc(a)}</span>`).join('')}</div></div>
     <div class="v">${c.dir_tel ? `<a class="tag ok" target="_blank" rel="noopener" href="${wa(c.dir_tel, `Maranata, ${c.dir_nome.split(' ')[0]}! Sobre o Campori do clube ${c.nome}: `)}">WhatsApp</a>` : ''}${M ? `<br><button class="tag b" data-dir="${c.id}">Acesso</button>` : ''}</div></div>`).join('') || `<div class="empty">${reg || alertaF || busca ? 'Nenhum clube com estes filtros.' : 'Sem clubes.'}</div>`}</div>
   <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button><button class="btn sec" id="pds">📨 Pedidos</button>${M ? '<button class="btn gold" id="im">Importar clubes</button><button class="btn gold" id="ia">Importar acampantes (todos os clubes)</button><button class="btn sec" id="rgs">Regionais</button>' : ''}</div>`;
-  $('#bu').oninput = (e) => { busca = e.target.value; clearTimeout(el._t); el._t = setTimeout(() => { render(); setTimeout(() => { const b = $('#bu'); b.focus(); b.setSelectionRange(99, 99); }); }, 350); };
+  $('#bu').oninput = (e) => { busca = e.target.value; clearTimeout(el._t); el._t = setTimeout(() => { render(); setTimeout(() => { const b = $('#bu'); if (b) { b.focus(); b.setSelectionRange(99, 99); } }); }, 350); };
   if ($('#rg')) $('#rg').onchange = (e) => { reg = e.target.value; render(); };
   $('#fa').onchange = (e) => { alertaF = e.target.value; render(); };
   $('#ex').onclick = () => baixar('clubes_campori.csv', csv(['Região', 'Clube', 'Director', 'Telefone', 'Acampantes', 'Desbravadores', 'Direcção', 'Tudo pago', '% pago', 'Sem autorização', 'Sem ficha', '% material', 'Checklist', 'Alertas'], f.map((c) => [c.regiao, c.nome, c.dir_nome, c.dir_tel, c.n, c.dbv, c.dir, c.pagos, c.pct_pago, c.sem_aut, c.sem_ficha, c.pct_material, `${c.feitas}/${c.total}`, c.alertas.join(' | ')])));
@@ -404,6 +435,154 @@ V.visao = async (el) => {
   if (M) { $('#im').onclick = mImportar; $('#rgs').onclick = mRegionais; $('#ia').onclick = mImportarTodos; }
   $('#pds').onclick = mPedidos; if ($('#vp')) $('#vp').onclick = mPedidos;
 };
+
+
+// ===================== MAIS (director) =====================
+V.mais = async (el) => {
+  const L = [['material', 'Material', 'Quem tem o quê'], ['tarefas', 'Checklist', 'Preparação do clube'], ['avisos', 'Avisos', 'Da Missão e da Região'], ['documentos', 'Documentos', 'Regulamento e outros']];
+  el.innerHTML = `<h1>Mais</h1><div class="mais">${L.map(([k, n, d]) => `<a href="#/${k}">${IC[k]}${n}<br><small style="color:var(--mut);font-weight:400">${d}</small></a>`).join('')}
+   <a href="#" id="cs">${IC.sair}Trocar senha<br><small style="color:var(--mut);font-weight:400">${esc(S.me.user.login)}</small></a></div>`;
+  $('#cs').onclick = (e) => { e.preventDefault(); mSenha(false); };
+};
+
+// ===================== SECRETARIA DO CLUBE (director / secretário) =====================
+V.secClube = async (el) => {
+  const sub = location.hash.split('/')[2] || 'fichas', T = [['fichas', 'Fichas'], ['documentos', 'Documentos']];
+  el.innerHTML = `<h1>Secretaria</h1><p class="sub">${esc(S.me.clube?.nome || '')}</p>
+   <div class="chips">${T.map(([k, n]) => `<button data-s="${k}" class="${sub === k ? 'on' : ''}">${n}</button>`).join('')}</div><div id="sv"></div>`;
+  el.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => (location.hash = '#/secretaria/' + b.dataset.s)));
+  const sv = $('#sv', el);
+  await ({ fichas: V.fichas, documentos: V.documentos }[sub] || V.fichas)(sv);
+  const fb = sv.querySelector('.fab'); if (fb) el.append(fb);
+  sv.querySelectorAll('h1').forEach((h) => h.remove());
+};
+
+// ---------- FICHAS individuais ----------
+const SIM_NAO = ['', 'Sim', 'Não'];
+const FICHA = [
+  ['Dados pessoais', [['nascimento', 'Data de nascimento', 'date'], ['sexo', 'Sexo', ['', 'M', 'F']], ['morada', 'Morada / bairro'], ['escola_classe', 'Escola e classe']]],
+  ['Encarregado de educação', [['enc_nome', 'Nome do encarregado'], ['enc_parentesco', 'Parentesco', ['', 'Pai', 'Mãe', 'Avô/Avó', 'Tio/Tia', 'Irmão/Irmã', 'Outro']], ['enc_tel', 'Telefone', 'tel'], ['enc_tel2', 'Telefone alternativo', 'tel']]],
+  ['Contacto de emergência', [['emerg_nome', 'Nome (se diferente do encarregado)'], ['emerg_tel', 'Telefone', 'tel']]],
+  ['Saúde', [['tipo_sangue', 'Tipo sanguíneo', ['', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'Não sabe']], ['sabe_nadar', 'Sabe nadar', SIM_NAO],
+    ['alergias', 'Alergias (alimentos, medicamentos, picadas)', 'nada'], ['medicacao', 'Medicação que toma (nome e horário)', 'nada'], ['condicoes', 'Doenças ou condições (asma, epilepsia, drepanocitose, diabetes…)', 'nada'],
+    ['restricoes_alim', 'Restrições alimentares'], ['obs_saude', 'Outras informações para a equipa de saúde', 'area']]],
+  ['Autorizações', [['autoriza_tratamento', 'O encarregado autoriza tratamento médico de urgência', SIM_NAO], ['autoriza_imagem', 'Autoriza fotografias e vídeos', SIM_NAO],
+    ['autorizacao_entregue', 'Autorização de participação assinada e entregue', SIM_NAO], ['ficha_entregue', 'Ficha médica assinada e entregue', SIM_NAO], ['data_entrega', 'Data de entrega', 'date'], ['recebido_por', 'Recebido por']]],
+];
+const OBRIG = { Desbravador: ['nascimento', 'enc_nome', 'enc_tel', 'tipo_sangue', 'alergias', 'medicacao', 'condicoes', 'autoriza_tratamento', 'autorizacao_entregue', 'ficha_entregue'], Direção: ['emerg_nome', 'emerg_tel', 'tipo_sangue', 'alergias', 'medicacao', 'condicoes', 'ficha_entregue'] };
+const ROT = Object.fromEntries(FICHA.flatMap(([, cs]) => cs.map(([k, l]) => [k, l])));
+const emFalta = (d, cat) => OBRIG[cat === 'Desbravador' ? 'Desbravador' : 'Direção'].filter((k) => !d[k] || ((k === 'autorizacao_entregue' || k === 'ficha_entregue') && d[k] !== 'Sim'));
+let filtroF = '';
+V.fichas = async (el) => {
+  const [ps, fs] = await Promise.all([api('GET', `/c/${S.clube}/participantes`), api('GET', `/c/${S.clube}/fichas`)]), ed = pode();
+  const F = Object.fromEntries(fs.map((f) => [f.participante_id, f]));
+  const est = (p) => (!F[p.id] ? 'vazia' : F[p.id].completa ? 'completa' : 'incompleta');
+  const E = { completa: ['ok', 'Completa'], incompleta: ['w', 'Incompleta'], vazia: ['no', 'Por preencher'] };
+  const l = ps.filter((p) => !filtroF || est(p) === filtroF), nC = ps.filter((p) => est(p) === 'completa').length;
+  el.innerHTML = `<h1>Fichas</h1><p class="sub">Ficha individual de cada acampante: dados, encarregado, saúde e autorizações. Só a direcção do clube e a Missão a vêem.</p>
+   <div class="card">${barra(`Fichas completas: ${nC} de ${ps.length}`, pct(nC, ps.length))}</div>
+   <div class="chips" style="margin-top:12px">${[['', 'Todas'], ['vazia', 'Por preencher'], ['incompleta', 'Incompletas'], ['completa', 'Completas']].map(([k, n]) => `<button data-f="${k}" class="${filtroF === k ? 'on' : ''}">${n} (${k ? ps.filter((p) => est(p) === k).length : ps.length})</button>`).join('')}</div>
+   <div class="list">${l.map((p) => `<div class="row" data-p="${p.id}"><div class="t"><b>${esc(p.nome)}</b><small>${p.categoria}${F[p.id] ? ' · actualizada ' + dt(F[p.id].atualizado_em.slice(0, 10)) + (F[p.id].atualizado_por ? ' por ' + esc(F[p.id].atualizado_por.split(' ')[0]) : '') : ''}</small></div><span class="tag ${E[est(p)][0]}">${E[est(p)][1]}</span></div>`).join('') || '<div class="empty">Ninguém neste filtro.</div>'}</div>
+   <div class="acts noprint"><button class="btn gold" id="rs">🩺 Resumo de saúde</button><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button></div>`;
+  el.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { filtroF = b.dataset.f; render(); }));
+  el.querySelectorAll('[data-p]').forEach((r) => (r.onclick = () => mFicha(+r.dataset.p, ed)));
+  $('#rs', el).onclick = resumoSaude;
+  $('#ex', el).onclick = async () => { const sd = await api('GET', `/c/${S.clube}/saude`);
+    baixar(`saude_${S.clubes.find((c) => c.id === S.clube)?.nome || S.me.clube?.nome}.csv`, csv(['Nome', 'Categoria', 'Nascimento', 'Tipo sanguíneo', 'Alergias', 'Medicação', 'Condições', 'Restrições alimentares', 'Sabe nadar', 'Contacto de emergência', 'Telefone'], sd.map((x) => [x.nome, x.categoria, dt(x.nascimento) + (x.nascimento ? '/' + x.nascimento.slice(0, 4) : ''), x.tipo_sangue, x.alergias, x.medicacao, x.condicoes, x.restricoes_alim, x.sabe_nadar, x.emerg_nome, x.emerg_tel]))); };
+};
+async function mFicha(pid, ed) {
+  const f = await api('GET', `/c/${S.clube}/fichas/${pid}`), p = f.participante, d = { nascimento: p.nascimento, enc_nome: p.encarregado, enc_tel: p.categoria === 'Desbravador' ? p.telefone : '', ...f.dados };
+  if (!d.recebido_por && ed) d.recebido_por = '';
+  const campo = ([k, l, t]) => {
+    const v = d[k] ?? '', dis = ed ? '' : 'disabled', ob = emFalta({}, p.categoria).includes(k) ? ' *' : '';
+    if (Array.isArray(t)) return `<div><label>${esc(l)}${ob}</label><select name="${k}" ${dis}>${t.map((o) => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select></div>`;
+    if (t === 'nada') return `<div class="full"><label>${esc(l)}${ob}</label><div style="display:flex;gap:6px"><input name="${k}" value="${esc(v)}" ${dis}>${ed ? `<button type="button" class="btn sm sec" data-nada="${k}">Nenhuma</button>` : ''}</div></div>`;
+    if (t === 'area') return `<div class="full"><label>${esc(l)}</label><textarea name="${k}" ${dis}>${esc(v)}</textarea></div>`;
+    return `<div><label>${esc(l)}${ob}</label><input name="${k}" type="${t || 'text'}" value="${esc(v)}" ${t === 'tel' ? 'inputmode="tel"' : ''} ${dis}></div>`;
+  };
+  const secs = FICHA.filter(([n]) => !(p.categoria !== 'Desbravador' && n === 'Encarregado de educação'));
+  modal(`<h3>Ficha de ${esc(p.nome)}</h3><p class="sub">${p.categoria}${f.atualizado_em ? ` · actualizada a ${dt(f.atualizado_em.slice(0, 10))}${f.atualizado_por ? ' por ' + esc(f.atualizado_por) : ''}` : ' · ainda não preenchida'}</p>
+   <div id="ff" class="falta"></div><form id="f">${secs.map(([n, cs]) => `<div class="secc">${n}</div><div class="fl">${cs.map(campo).join('')}</div>`).join('')}
+   <p class="sub" style="margin-top:10px">* Obrigatório para a ficha ficar completa. Ao guardar, a app actualiza também a data de nascimento, o encarregado e as etiquetas Autorização e Ficha do acampante.</p>
+   <div class="acts"><button type="button" class="btn sec" id="pf">${IC.print} Imprimir</button><button type="button" class="btn sec" onclick="fechar()">Fechar</button>${ed ? '<button class="btn">Guardar ficha</button>' : ''}</div></form>`, (m) => {
+    const form = $('#f', m), ler = () => Object.fromEntries([...new FormData(form)].map(([k, v]) => [k, String(v).trim()]));
+    const mostra = () => { const x = emFalta(ler(), p.categoria); $('#ff', m).innerHTML = x.length ? `Falta para ficar completa: ${x.map((k) => esc(ROT[k])).join(' · ')}` : '<span style="color:var(--green)">✅ Ficha completa</span>'; };
+    mostra(); form.oninput = mostra; form.onchange = mostra;
+    m.querySelectorAll('[data-nada]').forEach((b) => (b.onclick = () => { form[b.dataset.nada].value = 'Nenhuma'; mostra(); }));
+    $('#pf', m).onclick = () => imprimirFicha(p, ed ? ler() : d);
+    if (ed) form.onsubmit = async (e) => { e.preventDefault(); const dados = ler(); if (!dados.recebido_por && (dados.autorizacao_entregue === 'Sim' || dados.ficha_entregue === 'Sim')) dados.recebido_por = S.me.user.nome;
+      try { const r = await api('PUT', `/c/${S.clube}/fichas/${pid}`, { dados }); fechar(); toast(r.completa ? 'Ficha completa ✅' : 'Ficha guardada (ainda incompleta)'); render(); } catch (er) { toast(er.message, 1); } };
+  });
+}
+function janelaImpressao(titulo, corpo) {
+  const w = window.open('', '_blank'); if (!w) return toast('Permita janelas pop-up para imprimir', 1);
+  w.document.write(`<!doctype html><html lang="pt"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>body{font:13px/1.45 system-ui,Arial,sans-serif;color:#111;margin:24px}h1{font-size:18px;margin:0}h2{font-size:13px;text-transform:uppercase;border-bottom:1px solid #999;margin:16px 0 6px;padding-bottom:3px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:5px 6px;text-align:left;vertical-align:top}th{background:#eef2f8;font-size:11px}.cab{display:flex;gap:14px;align-items:center;border-bottom:3px solid #0B2A4A;padding-bottom:8px;margin-bottom:8px}.cab img{height:64px}.ass{margin-top:40px;display:flex;gap:40px}.ass div{flex:1;border-top:1px solid #333;text-align:center;padding-top:4px;font-size:12px}@media print{body{margin:10mm}}</style></head><body>
+   <div class="cab"><img src="${location.origin}/logo.png"><div><h1>${esc(titulo)}</h1><div>${esc(S.me.evento.nome)} · ${esc(S.clubes.find((c) => c.id === S.clube)?.nome || S.me.clube?.nome || '')}</div></div></div>${corpo}<script>setTimeout(()=>print(),400)<\/script></body></html>`);
+  w.document.close();
+}
+function imprimirFicha(p, d) {
+  const linha = ([k, l]) => `<tr><th style="width:42%">${esc(l)}</th><td>${esc(d[k] && /^\d{4}-\d{2}-\d{2}$/.test(d[k]) ? dt(d[k]) + '/' + d[k].slice(0, 4) : d[k] || '')}</td></tr>`;
+  janelaImpressao('Ficha individual — ' + p.nome, `<p><b>${esc(p.nome)}</b> · ${p.categoria}</p>${FICHA.filter(([n]) => !(p.categoria !== 'Desbravador' && n === 'Encarregado de educação')).map(([n, cs]) => `<h2>${n}</h2><table>${cs.map(linha).join('')}</table>`).join('')}
+   <div class="ass"><div>Assinatura do encarregado</div><div>Assinatura do secretário do clube</div></div>`);
+}
+async function resumoSaude() {
+  const sd = await api('GET', `/c/${S.clube}/saude`), com = sd.filter((x) => [x.alergias, x.medicacao, x.condicoes, x.restricoes_alim].some((v) => v && !/^nenhum/i.test(v)));
+  janelaImpressao('Resumo de saúde', `<p>Acampantes com alergias, medicação, condições de saúde ou restrições alimentares: <b>${com.length}</b> de ${sd.length}. Fichas por preencher: <b>${sd.filter((x) => !x.tem_ficha).length}</b>.</p>
+   <table><tr><th>Nome</th><th>Sangue</th><th>Alergias</th><th>Medicação</th><th>Condições</th><th>Restrições</th><th>Emergência</th></tr>${com.map((x) => `<tr><td><b>${esc(x.nome)}</b><br>${x.categoria}</td><td>${esc(x.tipo_sangue)}</td><td>${esc(x.alergias)}</td><td>${esc(x.medicacao)}</td><td>${esc(x.condicoes)}</td><td>${esc(x.restricoes_alim)}</td><td>${esc(x.emerg_nome)}<br>${esc(x.emerg_tel)}</td></tr>`).join('') || '<tr><td colspan="7">Nenhum registo.</td></tr>'}</table>
+   <h2>Não sabem nadar</h2><p>${sd.filter((x) => x.sabe_nadar === 'Não').map((x) => esc(x.nome)).join(', ') || '—'}</p>`);
+}
+
+// ===================== DOCUMENTOS =====================
+const tamanho = (n) => (n > 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.ceil(n / 1024) + ' KB');
+const iconeDoc = (t, f) => (/pdf/.test(t) || /\.pdf$/i.test(f) ? '📕' : /word|\.docx?$/i.test(t + f) ? '📘' : /sheet|excel|\.xlsx?$|csv/i.test(t + f) ? '📗' : /image/.test(t) ? '🖼️' : /presentation|\.pptx?$/i.test(t + f) ? '📙' : '📄');
+V.documentos = async (el) => {
+  const ds = await api('GET', '/documentos'), pub = coord();
+  el.innerHTML = `<h1>Documentos</h1><p class="sub">${pub ? 'Publique documentos para todos os clubes ou para uma região.' : 'Documentos da Missão e da sua Região. Toque para abrir ou guardar.'}</p>
+   <div class="list">${ds.map((d) => `<div class="row" data-d="${d.id}"><span style="font-size:26px">${iconeDoc(d.tipo, d.ficheiro)}</span><div class="t"><b>${esc(d.titulo)}</b><small>${d.descricao ? esc(d.descricao) + ' · ' : ''}${tamanho(d.tamanho)} · ${dt(d.criado_em.slice(0, 10))}${pub ? ' · Para: ' + (d.alvo === 'todos' ? 'todos os clubes' : 'Região ' + esc(d.regiao || '')) : ''}</small></div>
+     <div class="v"><button class="btn sm" data-b="${d.id}">Abrir</button>${pub && (missao() || d.autor_id === S.me.user.id) ? `<br><button class="tag no" data-x="${d.id}">Apagar</button>` : ''}</div></div>`).join('') || '<div class="empty">Ainda não há documentos.</div>'}</div>`;
+  el.querySelectorAll('[data-b]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); baixarDoc(ds.find((d) => d.id === +b.dataset.b), b); }));
+  el.querySelectorAll('.row[data-d]').forEach((r) => (r.onclick = () => baixarDoc(ds.find((d) => d.id === +r.dataset.d), r.querySelector('[data-b]'))));
+  el.querySelectorAll('[data-x]').forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); if (!confirm('Apagar este documento para todos?')) return; await api('DELETE', '/documentos/' + b.dataset.x); render(); }));
+  if (pub) fab(mDocumento);
+};
+async function baixarDoc(d, btn) {
+  const t0 = btn?.textContent; const partes = [];
+  try {
+    for (let n = 0; n < d.partes; n++) {
+      if (btn) btn.textContent = d.partes > 1 ? `${Math.round((n / d.partes) * 100)}%` : '…';
+      const r = await fetch(`/api/documentos/${d.id}/parte/${n}`, { headers: { authorization: 'Bearer ' + S.token } });
+      if (!r.ok) throw new Error('Não foi possível descarregar');
+      partes.push(await r.arrayBuffer());
+    }
+    const url = URL.createObjectURL(new Blob(partes, { type: d.tipo || 'application/octet-stream' }));
+    const a = document.createElement('a'); a.href = url; a.download = d.ficheiro; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { toast(e.message, 1); } finally { if (btn) btn.textContent = t0; }
+}
+function mDocumento() {
+  const M = missao(), regs = [...new Set(S.clubes.map((c) => c.regiao))].sort();
+  modal(`<h3>Publicar documento</h3><form id="f"><label>Ficheiro (até 20 MB)</label><input type="file" name="fi" required>
+   <label>Título</label><input name="titulo" required placeholder="Ex.: Regulamento do II Campori"><label>Descrição (opcional)</label><input name="descricao">
+   ${M ? `<label>Para</label><select name="alvo"><option value="todos">Todos os clubes</option>${regs.map((r) => `<option value="${esc(r)}">Região ${esc(r)}</option>`).join('')}</select>` : '<p class="sub">Fica disponível para os clubes da sua região.</p>'}
+   <p id="pg" class="sub"></p><div class="acts"><button type="button" class="btn sec" onclick="fechar()">Cancelar</button><button class="btn">Publicar</button></div></form>`, (m) => {
+    const f = $('#f', m);
+    f.fi.onchange = () => { const x = f.fi.files[0]; if (x && !f.titulo.value) f.titulo.value = x.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '); };
+    f.onsubmit = async (e) => { e.preventDefault(); const x = f.fi.files[0], bt = $('button.btn:not(.sec)', f); if (!x) return;
+      if (x.size > 20 * 1048576) return toast('O ficheiro tem mais de 20 MB', 1);
+      bt.disabled = true;
+      try {
+        let alvo = 'todos', regiao_id = null;
+        if (M && f.alvo.value !== 'todos') { alvo = 'regiao'; regiao_id = (await api('GET', '/regioes')).find((r) => r.nome === f.alvo.value)?.id; }
+        const r = await api('POST', '/documentos', { titulo: f.titulo.value, descricao: f.descricao.value, ficheiro: x.name, tipo: x.type, tamanho: x.size, alvo, regiao_id });
+        const n = Math.ceil(x.size / r.parte);
+        for (let i = 0; i < n; i++) {
+          $('#pg', m).textContent = `A enviar… ${Math.round((i / n) * 100)}%`;
+          const res = await fetch(`/api/documentos/${r.id}/parte/${i}`, { method: 'PUT', headers: { authorization: 'Bearer ' + S.token }, body: x.slice(i * r.parte, (i + 1) * r.parte) });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).erro || 'Falhou o envio');
+        }
+        fechar(); toast('Documento publicado'); render();
+      } catch (er) { toast(er.message, 1); bt.disabled = false; $('#pg', m).textContent = ''; } };
+  });
+}
 
 // ===================== AVISOS =====================
 const paraQuem = (a) => (a.alvo === 'todos' ? 'Todos os directores' : a.alvo === 'regiao' ? 'Região ' + (a.regiao || '') : 'Clube ' + (a.clube || ''));
@@ -476,7 +655,7 @@ V.secretaria = async (el) => {
     <div><span class="tag ${cor[k.estado]}">${k.estado}</span><span class="tag b">${TIPOS[k.tipo] || k.tipo}</span>${k.prioridade === 'Alta' ? '<span class="tag no">Alta</span>' : ''}</div></div></div>`).join('') || '<div class="empty">Sem casos neste filtro.</div>'}</div>
   <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button>${M ? `<button class="btn gold" id="io">Importar inscritos oficiais</button>` : ''}</div>`;
   const re = () => render();
-  $('#sq').oninput = (e) => { F.q = e.target.value; clearTimeout(el._t); el._t = setTimeout(() => { re(); setTimeout(() => { const b = $('#sq'); b.focus(); b.setSelectionRange(99, 99); }); }, 350); };
+  $('#sq').oninput = (e) => { F.q = e.target.value; clearTimeout(el._t); el._t = setTimeout(() => { re(); setTimeout(() => { const b = $('#sq'); if (b) { b.focus(); b.setSelectionRange(99, 99); } }); }, 350); };
   if ($('#sr')) $('#sr').onchange = (e) => { F.reg = e.target.value; re(); };
   $('#st').onchange = (e) => { F.tipo = e.target.value; re(); };
   el.querySelectorAll('[data-e]').forEach((b) => (b.onclick = () => { F.estado = b.dataset.e; re(); }));
@@ -556,7 +735,7 @@ function mProcurar() {
 V.clube = async (el) => {
   const sub = location.hash.split('/')[2] || 'painel', c = S.clubes.find((x) => x.id === S.clube);
   if (!c) { location.hash = '#/visao'; return; }
-  const T = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ['material', 'Material'], ['tarefas', 'Checklist']];
+  const T = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ...(missao() ? [['fichas', 'Fichas']] : []), ['material', 'Material'], ['tarefas', 'Checklist']];
   el.innerHTML = `<p class="sub noprint" style="margin:0 0 6px"><a href="#/visao">← Clubes</a></p><h1>${esc(c.nome)}</h1><p class="sub">${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}${pode() ? '' : ' · só leitura'}</p>
    <div class="chips noprint">${T.map(([k, n]) => `<button data-s="${k}" class="${sub === k ? 'on' : ''}">${n}</button>`).join('')}</div><div id="sv"></div>`;
   el.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => (location.hash = '#/clube/' + b.dataset.s)));
@@ -584,7 +763,7 @@ V.geral = async (el) => {
    <div class="card kpi ${pct(s('recebido'), s('devido')) >= 80 ? 'green' : 'gold'}"><small>Pagamentos</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))} de ${kz(s('devido'))}</i></div>
    <div class="card kpi"><small>Com tudo pago</small><b>${s('pagos')}</b><i>de ${n} acampantes</i></div>
   </div>
-  <div class="card" style="margin-top:12px">${barra('Pagamentos', pct(s('recebido'), s('devido')))}${barra('Autorizações dos pais', pct(dbv - s('sem_aut'), dbv))}${barra('Fichas médicas', pct(n - s('sem_ficha'), n))}${barra('Material individual (média)', ls.length ? Math.round(s('pct_material') / ls.length) : 0)}${barra('Checklist dos clubes', pct(s('feitas'), s('total')))}${barra('Clubes com director na app', pct(ls.filter((c) => c.dir_id).length, ls.length))}</div>
+  <div class="card" style="margin-top:12px">${barra('Pagamentos', pct(s('recebido'), s('devido')))}${barra('Autorizações dos pais', pct(dbv - s('sem_aut'), dbv))}${barra('Fichas médicas', pct(n - s('sem_ficha'), n))}${barra('Fichas individuais completas', pct(s('fichas'), n))}${barra('Material individual (média)', ls.length ? Math.round(s('pct_material') / ls.length) : 0)}${barra('Checklist dos clubes', pct(s('feitas'), s('total')))}${barra('Clubes com director na app', pct(ls.filter((c) => c.dir_id).length, ls.length))}</div>
   <h2>Pontos de atenção</h2>
   <div class="list">${att.map(([k, t, q]) => `<div class="row" data-a="${k}"><div class="t"><b>${esc(t)}</b></div><span class="tag ${['sem_adultos', 'racio', 'pedidos'].includes(k) ? 'no' : 'w'}">${q} clube${q > 1 ? 's' : ''}</span></div>`).join('') || '<div class="alert ok">✅ Nenhum ponto de atenção.</div>'}</div>
   <h2>${M ? 'Por região' : 'Clubes da região'}</h2>
@@ -604,7 +783,7 @@ async function mPedidos() {
   const ps = await api('GET', '/pedidos'), M = missao();
   modal(`<h3>Pedidos dos clubes</h3><p class="sub">Inscrições fechadas: só a Missão inclui ou retira acampantes.</p>
    <div class="list">${ps.map((x) => `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${x.tipo === 'incluir' ? '➕ Incluir' : '➖ Retirar'} ${esc(x.nome)}</b><span class="tag ${x.estado === 'pendente' ? 'w' : x.estado === 'aceite' ? 'ok' : 'no'}">${x.estado}</span></div>
-     <small style="color:var(--mut)">${esc(x.clube)} · ${esc(x.regiao)} · ${x.categoria}${x.nascimento ? ' · nasc. ' + dt(x.nascimento) + '/' + x.nascimento.slice(0, 4) : ''} · ${dt(x.criado_em.slice(0, 10))}</small>
+     <small style="color:var(--mut)">${esc(x.clube)} · ${esc(x.regiao)}${x.inscritos_oficial != null ? ` · oficial ${x.inscritos_oficial}, com nome ${x.com_nome}` : ''}${x.estado === 'pendente' && x.inscritos_oficial != null ? `<br><b>${x.tipo === 'retirar' ? 'Ao aceitar: o total do clube desce 1.' : x.inscritos_oficial > x.com_nome ? 'Ao aceitar: preenche um dos inscritos sem nome (o total fica igual).' : 'Ao aceitar: é uma inscrição nova (o total sobe 1).'}</b>` : ''} · ${x.categoria}${x.nascimento ? ' · nasc. ' + dt(x.nascimento) + '/' + x.nascimento.slice(0, 4) : ''} · ${dt(x.criado_em.slice(0, 10))}</small>
      ${x.motivo ? `<p style="margin:6px 0;font-size:14px">${esc(x.motivo)}</p>` : ''}${x.resposta ? `<p class="sub" style="margin:4px 0">Resposta: ${esc(x.resposta)}</p>` : ''}
      ${M && x.estado === 'pendente' ? `<div class="acts" style="margin-top:8px"><button class="btn red sm" data-r="${x.id}">Recusar</button><button class="btn sm" data-a="${x.id}">Aceitar</button></div>` : ''}</div>`).join('') || '<p class="sub">Sem pedidos.</p>'}</div>
    <div class="acts"><button class="btn sec" onclick="fechar();render()">Fechar</button></div>`, (m) => {
