@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "campori-app",
+  "main": "src/index.js",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "campori",
+      // COLE AQUI o "Database ID" da base de dados "campori" (Cloudflare > Storage & Databases > D1)
+      "database_id": "COLE-AQUI-O-ID-DA-BASE-DE-DADOS"
+    }
+  ],
+  "observability": { "enabled": true }
+}
