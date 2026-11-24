@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '3.0';
+const VERSAO = '3.1';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -375,6 +375,8 @@ const ALERTAS = [['sem_director', 'Sem director com acesso', (c) => !c.dir_id], 
   ['sem_adultos', 'Sem adultos inscritos', (c) => c.n && !c.dir], ['racio', 'Poucos adultos para os desbravadores', (c) => c.alertas.some((a) => a.startsWith('Mais de'))],
   ['atrasadas', 'Com tarefas atrasadas', (c) => c.atrasadas > 0], ['pagar', 'Com pagamentos em falta (após o prazo)', (c) => c.alertas.some((a) => a.includes('por pagar'))],
   ['aut', 'Com autorizações em falta (após o prazo)', (c) => c.alertas.some((a) => a.includes('autorização'))], ['pedidos', 'Com pedidos à espera', (c) => c.pedidos > 0]];
+// inscritos oficiais (com e sem nome) vs. pessoas com nome na app
+const oficiais = (ls) => ({ of: ls.reduce((a, c) => a + (c.inscritos_oficial ?? c.n), 0), sem: ls.reduce((a, c) => a + Math.max(0, (c.inscritos_oficial ?? c.n) - c.n), 0) });
 const verClubes = (r, a) => { reg = r || ''; alertaF = a || ''; busca = ''; location.hash = '#/visao'; };
 V.visao = async (el) => {
   if (papel() === 'director') return V.painel(el);
@@ -383,7 +385,7 @@ V.visao = async (el) => {
   const f = ls.filter((c) => (!reg || c.regiao === reg) && (!AF || AF[2](c)) && (!busca || nrm(c.nome + ' ' + c.regiao + ' ' + (c.dir_nome || '')).includes(nrm(busca)))).sort((a, b) => b.alertas.length - a.alertas.length || a.nome.localeCompare(b.nome));
   const s = (k) => f.reduce((a, c) => a + c[k], 0), npd = ls.reduce((a, c) => a + c.pedidos, 0);
   el.innerHTML = `${npd ? `<div class="alert" style="cursor:pointer" id="vp">📨 <b>${npd} pedido(s)</b> de inclusão/retirada à espera de resposta. Toque para ver.</div>` : ''}<h1>Clubes</h1><p class="sub">${M ? 'Toda a Missão' : 'Região ' + esc(S.me.regiao?.nome)} · ${f.length} clubes · faltam ${dias(S.me.hoje, ev.inicio)} dias</p>
-  <div class="grid"><div class="card kpi"><small>Acampantes</small><b>${s('n')}</b><i>${s('dbv')} dbv · ${s('dir')} direcção</i></div><div class="card kpi gold"><small>Pago</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))}</i></div>
+  <div class="grid"><div class="card kpi"><small>Inscritos</small><b>${oficiais(f).of}</b><i>${s('n')} com nome na app${oficiais(f).sem ? ` · <b style="font-size:inherit;display:inline;color:var(--red)">${oficiais(f).sem} sem nome</b>` : ''}</i></div><div class="card kpi gold"><small>Pago</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))}</i></div>
    <div class="card kpi"><small>Checklist</small><b>${pct(s('feitas'), s('total'))}%</b></div><div class="card kpi red"><small>Clubes com alertas</small><b>${f.filter((c) => c.alertas.length).length}</b></div></div>
   <div class="tools" style="margin-top:12px"><input type="search" id="bu" placeholder="Procurar clube ou director…" value="${esc(busca)}">
    ${M ? `<select id="rg"><option value="">Todas as regiões</option>${[...new Set(ls.map((c) => c.regiao))].sort().map((r) => `<option ${r === reg ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}
@@ -577,7 +579,7 @@ V.geral = async (el) => {
   <div class="card hero"><small>${f >= 0 ? 'Dias até à partida' : 'Campori a decorrer'}</small><div class="big">${Math.max(0, f)}</div><small>${esc(ev.local)} · ${dt(ev.inicio)} a ${dt(ev.fim)}</small>
    <div class="marcos">${[['Cobrança nos clubes', ev.prazo_cobranca], ['Pagamento do transporte', ev.prazo_transporte], ['Partida', ev.inicio]].map(([t, x]) => { const k = dias(h, x); return `<div class="marco ${k < 0 ? 'feito' : k <= 7 ? 'perto' : ''}"><b>${dt(x)}</b>${t}</div>`; }).join('')}</div></div>
   <div class="grid" style="margin-top:12px">
-   <div class="card kpi"><small>Acampantes</small><b>${n.toLocaleString('pt-PT')}</b><i>${dbv} desbravadores · ${dir} direcção</i></div>
+   <div class="card kpi"><small>Inscritos (oficial)</small><b>${oficiais(ls).of.toLocaleString('pt-PT')}</b><i>${n} com nome na app (${dbv} dbv · ${dir} direcção)${oficiais(ls).sem ? ` · <span style="color:var(--red)">${oficiais(ls).sem} sem nome</span>` : ''}</i></div>
    <div class="card kpi"><small>Clubes</small><b>${ls.length}</b><i>${ls.filter((c) => c.dir_id).length} com director na app</i></div>
    <div class="card kpi ${pct(s('recebido'), s('devido')) >= 80 ? 'green' : 'gold'}"><small>Pagamentos</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))} de ${kz(s('devido'))}</i></div>
    <div class="card kpi"><small>Com tudo pago</small><b>${s('pagos')}</b><i>de ${n} acampantes</i></div>
