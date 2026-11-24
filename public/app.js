@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '4.3';
+const VERSAO = '4.4';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -514,16 +514,23 @@ async function mFicha(pid, ed) {
       try { const r = await api('PUT', `/c/${S.clube}/fichas/${pid}`, { dados }); fechar(); toast(r.completa ? 'Ficha completa ✅' : 'Ficha guardada (ainda incompleta)'); render(); } catch (er) { toast(er.message, 1); } };
   });
 }
-function janelaImpressao(titulo, corpo) {
+function janelaImpressao(titulo, corpo, css = '') {
   const w = window.open('', '_blank'); if (!w) return toast('Permita janelas pop-up para imprimir', 1);
-  w.document.write(`<!doctype html><html lang="pt"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>body{font:13px/1.45 system-ui,Arial,sans-serif;color:#111;margin:24px}h1{font-size:18px;margin:0}h2{font-size:13px;text-transform:uppercase;border-bottom:1px solid #999;margin:16px 0 6px;padding-bottom:3px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:5px 6px;text-align:left;vertical-align:top}th{background:#eef2f8;font-size:11px}.cab{display:flex;gap:14px;align-items:center;border-bottom:3px solid #0B2A4A;padding-bottom:8px;margin-bottom:8px}.cab img{height:64px}.ass{margin-top:40px;display:flex;gap:40px}.ass div{flex:1;border-top:1px solid #333;text-align:center;padding-top:4px;font-size:12px}@media print{body{margin:10mm}}</style></head><body>
+  w.document.write(`<!doctype html><html lang="pt"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>body{font:13px/1.45 system-ui,Arial,sans-serif;color:#111;margin:24px}h1{font-size:18px;margin:0}h2{font-size:13px;text-transform:uppercase;border-bottom:1px solid #999;margin:16px 0 6px;padding-bottom:3px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:5px 6px;text-align:left;vertical-align:top}th{background:#eef2f8;font-size:11px}.cab{display:flex;gap:14px;align-items:center;border-bottom:3px solid #0B2A4A;padding-bottom:8px;margin-bottom:8px}.cab img{height:64px}.ass{margin-top:40px;display:flex;gap:40px}.ass div{flex:1;border-top:1px solid #333;text-align:center;padding-top:4px;font-size:12px}@media print{body{margin:10mm}}${css}</style></head><body>
    <div class="cab"><img src="${location.origin}/logo.png"><div><h1>${esc(titulo)}</h1><div>${esc(S.me.evento.nome)} · ${esc(S.clubes.find((c) => c.id === S.clube)?.nome || S.me.clube?.nome || '')}</div></div></div>${corpo}<script>setTimeout(()=>print(),400)<\/script></body></html>`);
   w.document.close();
 }
 function imprimirFicha(p, d) {
   const linha = ([k, l]) => `<tr><th style="width:42%">${esc(l)}</th><td>${esc(d[k] && /^\d{4}-\d{2}-\d{2}$/.test(d[k]) ? dt(d[k]) + '/' + d[k].slice(0, 4) : d[k] || '')}</td></tr>`;
-  janelaImpressao('Ficha individual — ' + p.nome, `<p><b>${esc(p.nome)}</b> · ${p.categoria}</p>${FICHA.filter(([n]) => !(p.categoria !== 'Desbravador' && n === 'Encarregado de educação')).map(([n, cs]) => `<h2>${n}</h2><table>${cs.map(linha).join('')}</table>`).join('')}
-   <div class="ass"><div>Assinatura do encarregado</div><div>Assinatura do secretário do clube</div></div>`);
+  // uma só folha A4: secções em duas colunas e letra compacta
+  const sec = ([n, cs]) => `<h2>${n}</h2><table>${cs.map(linha).join('')}</table>`;
+  const S2 = FICHA.filter(([n]) => !(p.categoria !== 'Desbravador' && n === 'Encarregado de educação'));
+  const esq = S2.filter(([n]) => n !== 'Saúde' && n !== 'Autorizações'), dir = S2.filter(([n]) => n === 'Saúde' || n === 'Autorizações');
+  janelaImpressao('Ficha individual — ' + p.nome, `<p class="nome"><b>${esc(p.nome)}</b> · ${p.categoria}</p><div class="cols"><div>${esq.map(sec).join('')}</div><div>${dir.map(sec).join('')}</div></div>
+   <div class="ass"><div>Assinatura do encarregado</div><div>Assinatura do director do clube</div></div>`,
+   `@page{size:A4;margin:10mm}body{font-size:12.5px;line-height:1.35;margin:12px}@media print{body{margin:0}}.cab{padding-bottom:5px;margin-bottom:5px}.cab img{height:46px}h1{font-size:15px}.nome{margin:4px 0 2px;font-size:13px}
+    h2{font-size:12px;margin:12px 0 4px}td,th{padding:5px 6px}th{font-size:11px;width:45%!important}.cols{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.cols>div{min-width:0}td{word-break:break-word}
+    .ass{margin-top:48px;gap:30px;break-inside:avoid}body *{break-inside:avoid}`);
 }
 async function resumoSaude() {
   const sd = await api('GET', `/c/${S.clube}/saude`), com = sd.filter((x) => [x.alergias, x.medicacao, x.condicoes, x.restricoes_alim].some((v) => v && !/^nenhum/i.test(v)));
