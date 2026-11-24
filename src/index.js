@@ -1,5 +1,5 @@
 // Campori — versão simples (Cloudflare Worker + D1)
-const VERSAO = '2.4';
+const VERSAO = '2.6';
 
 const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const hoje = () => new Date(Date.now() + 3600e3).toISOString().slice(0, 10); // hora de Angola
@@ -29,10 +29,27 @@ async function iniciar(DB, c) {
     ...MODELOS_BASE.map(([t, f, x]) => DB.prepare('INSERT INTO modelos (clube_id,titulo,filtro,texto) VALUES (?,?,?,?)').bind(c.id, t, f, x))]);
 }
 
+// ---- participantes: só a Missão inclui ou retira (inscrições fechadas) ----
+const catDe = (x) => (/^(desbravador|aventureiro|dbv)?$/i.test(String(x || '').trim()) ? 'Desbravador' : 'Direção');
+const dataISO = (x) => { x = String(x || '').trim(); let m = x.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/); if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; m = x.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : ''; };
+const limpaNome = (x) => String(x || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+const insParticipante = (DB, cid, l) => DB.prepare('INSERT INTO participantes (clube_id,nome,categoria,nascimento,encarregado,telefone,obs) VALUES (?,?,?,?,?,?,?)')
+  .bind(cid, limpaNome(l.nome), l.categoria === 'Direção' || l.categoria === 'Desbravador' ? l.categoria : catDe(l.categoria), dataISO(l.nascimento), String(l.encarregado || '').trim().slice(0, 120), String(l.telefone || '').replace(/[^\d+ ]/g, '').trim().slice(0, 20), String(l.obs || '').trim().slice(0, 300));
+const delParticipante = (DB, cid, pid) => [
+  DB.prepare('DELETE FROM contrib_pagas WHERE participante_id IN (SELECT id FROM participantes WHERE id=? AND clube_id=?)').bind(pid, cid),
+  DB.prepare('DELETE FROM itens_tem WHERE participante_id IN (SELECT id FROM participantes WHERE id=? AND clube_id=?)').bind(pid, cid),
+  DB.prepare('DELETE FROM envios WHERE participante_id=? AND clube_id=?').bind(pid, cid),
+  DB.prepare('DELETE FROM participantes WHERE id=? AND clube_id=?').bind(pid, cid)];
+
 const PRAZO = `date(?, printf('%+d days', -m.dias_antes))`;
 
 async function metricas(DB, ids) {
   if (!ids.length) return {};
+  if (ids.length > 80) { // o D1 aceita no máximo 100 valores por consulta: calcular em blocos
+    const out = {};
+    for (let i = 0; i < ids.length; i += 80) Object.assign(out, await metricas(DB, ids.slice(i, i + 80)));
+    return out;
+  }
   const ev = await DB.prepare('SELECT * FROM evento WHERE id=1').first();
   const q = ids.map(() => '?').join(','), d = hoje();
   const VAL = `CASE WHEN p.categoria='Desbravador' THEN k.valor_dbv ELSE k.valor_dir END`;
@@ -151,11 +168,30 @@ async function api(req, DB, url) {
     const cl = (await DB.prepare(`SELECT c.id, c.nome, c.regiao_id, r.nome regiao, d.id dir_id, d.nome dir_nome, d.telefone dir_tel, d.email dir_email
       FROM clubes c JOIN regioes r ON r.id=c.regiao_id LEFT JOIN utilizadores d ON d.clube_id=c.id AND d.papel='director' AND d.ativo=1 ${w} GROUP BY c.id ORDER BY r.nome, c.nome`).all()).results;
     const m = await metricas(DB, cl.map((c) => c.id));
-    return json(cl.map((c) => ({ ...c, ...m[c.id] })));
+    const pend = Object.fromEntries((await DB.prepare("SELECT clube_id, COUNT(*) n FROM pedidos WHERE estado='pendente' GROUP BY clube_id").all()).results.map((r) => [r.clube_id, r.n]));
+    return json(cl.map((c) => ({ ...c, ...m[c.id], pedidos: pend[c.id] || 0 })));
+  }
+
+  // ---- pedidos de inclusão/retirada ----
+  if (p[0] === 'pedidos') {
+    if (u.papel === 'director') throw new E('Sem permissão', 403);
+    if (M === 'GET') {
+      const w = u.papel === 'regional' ? 'AND c.regiao_id=' + +u.regiao_id : '';
+      return json((await DB.prepare(`SELECT x.*, c.nome clube, r.nome regiao FROM pedidos x JOIN clubes c ON c.id=x.clube_id JOIN regioes r ON r.id=c.regiao_id WHERE (x.estado='pendente' OR x.respondido_em > datetime('now','-6 days')) ${w} ORDER BY x.estado='pendente' DESC, x.id DESC LIMIT 200`).all()).results);
+    }
+    if (!missao) throw new E('Só a Missão responde a pedidos', 403);
+    const x = await DB.prepare("SELECT * FROM pedidos WHERE id=? AND estado='pendente'").bind(+p[1]).first();
+    if (!x) throw new E('Pedido não encontrado ou já respondido');
+    const b = await body(), aceitar = b.acao === 'aceitar';
+    const st = [DB.prepare("UPDATE pedidos SET estado=?, resposta=?, respondido_em=datetime('now','+1 hour') WHERE id=?").bind(aceitar ? 'aceite' : 'recusado', String(b.resposta || '').slice(0, 300), x.id)];
+    if (aceitar && x.tipo === 'incluir') st.push(insParticipante(DB, x.clube_id, x));
+    if (aceitar && x.tipo === 'retirar') st.push(...delParticipante(DB, x.clube_id, x.participante_id));
+    await DB.batch(st);
+    return json({ ok: true });
   }
 
   // ---- só Missão: contas e importação ----
-  if (['importar', 'contas'].includes(p[0]) && !missao) throw new E('Só a Missão', 403);
+  if (['importar', 'contas', 'importar-acampantes'].includes(p[0]) && !missao) throw new E('Só a Missão', 403);
   if (p[0] === 'importar' && M === 'POST') {
     const regs = Object.fromEntries((await DB.prepare('SELECT * FROM regioes').all()).results.map((r) => [r.nome.toLowerCase(), r.id]));
     const res = { clubes: 0, acessos: [], erros: [] };
@@ -169,6 +205,23 @@ async function api(req, DB, url) {
         catch (e) { res.erros.push(`Linha ${i + 2} (${l.director}): ${e.message}`); }
       }
     }
+    return json(res);
+  }
+  // Lista nominal de todos os clubes (Região;Clube;Nome;Categoria;Nascimento…), enviada em blocos
+  if (p[0] === 'importar-acampantes' && M === 'POST') {
+    const regs = Object.fromEntries((await DB.prepare('SELECT * FROM regioes').all()).results.map((r) => [r.nome.toLowerCase(), r.id]));
+    const clubes = {}; for (const c of (await DB.prepare('SELECT id, regiao_id, nome FROM clubes').all()).results) clubes[c.regiao_id + '|' + c.nome.toLowerCase()] = c.id;
+    const ja = new Set((await DB.prepare('SELECT clube_id, nome FROM participantes').all()).results.map((r) => r.clube_id + '|' + r.nome.toLowerCase()));
+    const res = { criados: 0, repetidos: 0, clubes_novos: 0, erros: [] }, st = [];
+    for (const [i, l] of ((await body()).linhas || []).slice(0, 400).entries()) {
+      const rid = regs[String(l.regiao || '').trim().toLowerCase()], cn = String(l.clube || '').trim(), nome = limpaNome(l.nome);
+      if (!rid || !cn || !nome) { res.erros.push(`${l.linha || i + 2}: ${!rid ? `região "${l.regiao}" não existe` : !cn ? 'falta o clube' : 'falta o nome'}`); continue; }
+      let cid = clubes[rid + '|' + cn.toLowerCase()];
+      if (!cid) { cid = (await DB.prepare('INSERT INTO clubes (regiao_id,nome,igreja) VALUES (?,?,?)').bind(rid, cn, String(l.igreja || '').trim()).run()).meta.last_row_id; clubes[rid + '|' + cn.toLowerCase()] = cid; res.clubes_novos++; }
+      const k = cid + '|' + nome.toLowerCase(); if (ja.has(k)) { res.repetidos++; continue; }
+      ja.add(k); st.push(insParticipante(DB, cid, l)); res.criados++;
+    }
+    for (let i = 0; i < st.length; i += 100) await DB.batch(st.slice(i, i + 100));
     return json(res);
   }
   if (p[0] === 'contas') {
@@ -257,20 +310,34 @@ async function api(req, DB, url) {
       return json({ ok: true });
     }
     if (p[2] === 'importar' && M === 'POST') {
-      if (!escrever) throw new E('Apenas leitura', 403);
+      if (!missao) throw new E('As inscrições estão fechadas. Só a Missão pode acrescentar acampantes.', 403);
       const ja = new Set((await DB.prepare('SELECT nome FROM participantes WHERE clube_id=?').bind(c.id).all()).results.map((r) => r.nome.trim().toLowerCase()));
       const st = [], rep = [];
       for (const l of ((await body()).linhas || []).slice(0, 500)) {
-        const nome = String(l.nome || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+        const nome = limpaNome(l.nome);
         if (!nome) continue;
         if (ja.has(nome.toLowerCase())) { rep.push(nome); continue; }
         ja.add(nome.toLowerCase());
-        const cat = /^(desbravador|aventureiro|dbv)?$/i.test(String(l.categoria || '').trim()) ? 'Desbravador' : 'Direção';
-        st.push(DB.prepare('INSERT INTO participantes (clube_id,nome,categoria,encarregado,telefone,obs) VALUES (?,?,?,?,?,?)')
-          .bind(c.id, nome, cat, String(l.encarregado || '').trim().slice(0, 120), String(l.telefone || '').replace(/[^\d+ ]/g, '').trim().slice(0, 20), String(l.obs || '').trim().slice(0, 300)));
+        st.push(insParticipante(DB, c.id, l));
       }
       if (st.length) await DB.batch(st);
       return json({ criados: st.length, repetidos: rep });
+    }
+    if (p[2] === 'pedidos') {
+      if (M === 'GET') return json((await DB.prepare('SELECT * FROM pedidos WHERE clube_id=? ORDER BY id DESC LIMIT 50').bind(c.id).all()).results);
+      if (M !== 'POST' || u.papel !== 'director' || u.clube_id !== c.id) throw new E('Só o director do clube faz pedidos', 403);
+      const b = await body(), motivo = String(b.motivo || '').trim().slice(0, 300);
+      if (b.tipo === 'retirar') {
+        const pp = await DB.prepare('SELECT * FROM participantes WHERE id=? AND clube_id=?').bind(+b.participante_id, c.id).first();
+        if (!pp) throw new E('Acampante não encontrado');
+        if (await DB.prepare("SELECT id FROM pedidos WHERE participante_id=? AND estado='pendente'").bind(pp.id).first()) throw new E('Já existe um pedido pendente para esta pessoa');
+        await DB.prepare("INSERT INTO pedidos (clube_id,tipo,participante_id,nome,categoria,motivo) VALUES (?,'retirar',?,?,?,?)").bind(c.id, pp.id, pp.nome, pp.categoria, motivo).run();
+      } else {
+        const nome = limpaNome(b.nome);
+        if (!nome) throw new E('Indique o nome');
+        await DB.prepare("INSERT INTO pedidos (clube_id,tipo,nome,categoria,nascimento,motivo) VALUES (?,'incluir',?,?,?,?)").bind(c.id, nome, catDe(b.categoria), dataISO(b.nascimento), motivo).run();
+      }
+      return json({ ok: true });
     }
     if (p[2] === 'participantes') {
       if (M === 'GET') {
@@ -281,7 +348,8 @@ async function api(req, DB, url) {
         return json(ps.results.map((q) => ({ ...q, pagas: pg.results.filter((x) => x.participante_id === q.id).map((x) => x.contribuicao_id), itens: it.results.filter((x) => x.participante_id === q.id).map((x) => x.item_id) })));
       }
       if (!escrever) throw new E('Apenas leitura', 403);
-      if (M === 'DELETE') { await DB.batch([DB.prepare('DELETE FROM contrib_pagas WHERE participante_id IN (SELECT id FROM participantes WHERE id=? AND clube_id=?)').bind(+p[3], c.id), DB.prepare('DELETE FROM itens_tem WHERE participante_id IN (SELECT id FROM participantes WHERE id=? AND clube_id=?)').bind(+p[3], c.id), DB.prepare('DELETE FROM envios WHERE participante_id=? AND clube_id=?').bind(+p[3], c.id), DB.prepare('DELETE FROM participantes WHERE id=? AND clube_id=?').bind(+p[3], c.id)]); return json({ ok: true }); }
+      if ((M === 'DELETE' || M === 'POST') && !missao) throw new E('As inscrições estão fechadas. Faça um pedido à Missão.', 403);
+      if (M === 'DELETE') { await DB.batch(delParticipante(DB, c.id, +p[3])); return json({ ok: true }); }
       // marcar/desmarcar uma contribuição ou um item: PUT /c/:id/participantes/:pid/(contrib|item)/:x  { sim: 1|0 }
       if (M === 'PUT' && ['contrib', 'item'].includes(p[4])) {
         const pp = await DB.prepare('SELECT id FROM participantes WHERE id=? AND clube_id=?').bind(+p[3], c.id).first();
@@ -291,8 +359,8 @@ async function api(req, DB, url) {
         await DB.prepare((await body()).sim ? `INSERT OR IGNORE INTO ${tab} VALUES (?,?)` : `DELETE FROM ${tab} WHERE participante_id=? AND ${col}=?`).bind(pp.id, ok.id).run();
         return json({ ok: true });
       }
-      const b = await body(), F = ['nome', 'categoria', 'telefone', 'encarregado', 'pago_inscricao', 'pago_transporte', 'autorizacao', 'ficha_medica', 'obs'];
-      const v = {}; for (const k of F) if (b[k] !== undefined) v[k] = k.startsWith('pago') || k === 'autorizacao' || k === 'ficha_medica' ? (+b[k] ? 1 : 0) : String(b[k]).trim().slice(0, 300);
+      const b = await body(), F = ['nome', 'nascimento', 'telefone', 'encarregado', 'pago_inscricao', 'pago_transporte', 'autorizacao', 'ficha_medica', 'obs', ...(missao ? ['categoria'] : [])];
+      const v = {}; for (const k of F) if (b[k] !== undefined) v[k] = k.startsWith('pago') || k === 'autorizacao' || k === 'ficha_medica' ? (+b[k] ? 1 : 0) : k === 'nascimento' ? dataISO(b[k]) : k === 'nome' ? limpaNome(b[k]) : String(b[k]).trim().slice(0, 300);
       if (v.categoria && !['Desbravador', 'Direção'].includes(v.categoria)) throw new E('Categoria inválida');
       const ks = Object.keys(v);
       let pid = +p[3];

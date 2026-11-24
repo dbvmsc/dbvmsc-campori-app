@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '2.4';
+const VERSAO = '2.6';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -39,6 +39,8 @@ async function api(m, p, b) {
   return d;
 }
 const papel = () => S.me?.user.papel;
+const missao = () => papel() === 'missao';
+const idade = (n) => (n ? Math.floor((Date.parse(S.me.evento.inicio) - Date.parse(n)) / 31557600000) : null);
 const pode = () => papel() === 'missao' || (papel() === 'director' && S.clube === S.me.user.clube_id);
 const tema = () => (document.documentElement.dataset.tema = st.get('cs_tema') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'escuro' : 'claro'));
 tema();
@@ -97,7 +99,7 @@ addEventListener('hashchange', render); addEventListener('online', render); addE
     if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return; const a = abas().map((t) => t[0]), i = a.indexOf(rota()), j = i + (dx < 0 ? 1 : -1); if (i >= 0 && a[j]) location.hash = '#/' + a[j]; }, { passive: true });
 })();
 
-function modal(h, fn) { const m = $('#modal'); m.innerHTML = `<div class="sheet">${h}</div>`; m.hidden = false; m.onclick = (e) => e.target === m && fechar(); fn && fn(m); }
+function modal(h, fn) { const m = $('#modal'); m.innerHTML = `<div class="sheet">${h}</div>`; m.hidden = false; m.onclick = (e) => { if (e.target === m) fechar(); }; fn && fn(m); }
 function fechar() { $('#modal').hidden = true; $('#modal').innerHTML = ''; }
 const ro = () => (pode() ? '' : `<div class="ro">Só leitura: está a ver o clube <b>${esc(S.clubes.find((c) => c.id === S.clube)?.nome)}</b>.</div>`);
 const barra = (n, p) => { p = Math.max(0, Math.min(100, p || 0)); return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13px"><span>${n}</span><b>${p}%</b></div><div class="bar ${p < 40 ? 'r' : p < 80 ? 'o' : ''}"><span style="width:${p}%"></span></div></div>`; };
@@ -137,11 +139,13 @@ V.pessoas = async (el) => {
   const l = ps.filter(F[filtro][1]); const nome = S.clubes.find((c) => c.id === S.clube)?.nome || '';
   const tag = (on, n, a) => `<button class="tag ${on ? 'ok' : 'no'}" ${a}>${on ? '✓' : '✗'} ${esc(n)}</button>`;
   el.innerHTML = `<div class="print-h"><b>Lista de acampantes</b> — ${esc(nome)}</div><h1>Acampantes</h1><p class="sub">${ps.length} inscritos · toque nas etiquetas para marcar</p>${ro()}
+  ${papel() === 'director' ? `<div class="ro">🔒 Inscrições fechadas. Pode corrigir nomes e datas de nascimento; para incluir ou retirar alguém, faça um pedido à Missão.</div>` : ''}
+  <div id="pd"></div>
   <div class="chips">${Object.entries(F).map(([k, [n, f]]) => `<button data-f="${k}" class="${filtro === k ? 'on' : ''}">${n} (${ps.filter(f).length})</button>`).join('')}</div>
   <div class="list">${l.map((p) => { const dv = deve(p, ks);
-    return `<div class="row" data-id="${p.id}"><div class="t"><b>${esc(p.nome)}</b><small>${p.categoria}${p.encarregado ? ' · Enc. ' + esc(p.encarregado) : ''}${p.telefone ? ' · ' + esc(p.telefone) : ''}${dv ? ` · <span style="color:var(--red)">deve ${kz(dv)}</span>` : ' · <span style="color:var(--green)">tudo pago</span>'}</small>
+    return `<div class="row" data-id="${p.id}"><div class="t"><b>${esc(p.nome)}</b><small>${p.categoria}${idade(p.nascimento) != null ? ' · ' + idade(p.nascimento) + ' anos' : ''}${p.encarregado ? ' · Enc. ' + esc(p.encarregado) : ''}${p.telefone ? ' · ' + esc(p.telefone) : ''}${dv ? ` · <span style="color:var(--red)">deve ${kz(dv)}</span>` : ' · <span style="color:var(--green)">tudo pago</span>'}</small>
      <div>${FL.map(([k, n]) => tag(p[k], n, `data-k="${k}" data-p="${p.id}"`)).join('')}${minhas(ks, p).map((k) => tag(p.pagas.includes(k.id), k.nome, `data-c="${k.id}" data-p="${p.id}"`)).join('')}${DOC.map(([k, n]) => tag(p[k], n, `data-k="${k}" data-p="${p.id}"`)).join('')}</div></div></div>`; }).join('') || '<div class="empty">Ninguém aqui. Toque em + para adicionar.</div>'}</div>
-  <div class="acts noprint">${ed ? `<button class="btn gold" id="ct">💰 Contribuições do clube (${ks.length})</button><button class="btn sec" id="il">${IC.csv} Importar lista</button>` : ''}<button class="btn sec" onclick="print()">${IC.print} Imprimir</button><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button></div>`;
+  <div class="acts noprint">${ed ? `<button class="btn gold" id="ct">💰 Contribuições do clube (${ks.length})</button>` : ''}${missao() ? `<button class="btn sec" id="il">${IC.csv} Importar lista</button>` : ''}${papel() === 'director' ? '<button class="btn sec" id="pi">➕ Pedir inclusão à Missão</button>' : ''}<button class="btn sec" onclick="print()">${IC.print} Imprimir</button><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button></div>`;
   el.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { filtro = b.dataset.f; render(); }));
   $('#ex').onclick = () => baixar(`acampantes_${nome}.csv`, csv(['Nome', 'Categoria', 'Encarregado', 'Telefone', 'Inscrição', 'Transporte', ...ks.map((k) => k.nome), 'Autorização', 'Ficha médica', 'Deve (Kz)', 'Obs'],
     ps.map((p) => [p.nome, p.categoria, p.encarregado, p.telefone, p.pago_inscricao ? 'Pago' : 'Não', p.pago_transporte ? 'Pago' : 'Não', ...ks.map((k) => (!valorK(k, p) ? '—' : p.pagas.includes(k.id) ? 'Pago' : 'Não')), p.autorizacao ? 'Sim' : 'Não', p.ficha_medica ? 'Sim' : 'Não', deve(p, ks), p.obs])));
@@ -150,29 +154,45 @@ V.pessoas = async (el) => {
   const marcar = async (url, b) => { try { await api('PUT', url, b); render(); } catch (er) { toast(er.message, 1); } };
   el.querySelectorAll('[data-k]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); if (!ed) return; const p = ps.find((x) => x.id === +b.dataset.p); marcar(`/c/${S.clube}/participantes/${p.id}`, { [b.dataset.k]: p[b.dataset.k] ? 0 : 1 }); }));
   el.querySelectorAll('[data-c]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); if (!ed) return; const p = ps.find((x) => x.id === +b.dataset.p); marcar(`/c/${S.clube}/participantes/${p.id}/contrib/${b.dataset.c}`, { sim: p.pagas.includes(+b.dataset.c) ? 0 : 1 }); }));
+  if ($('#pi')) $('#pi').onclick = () => mPedido({ tipo: 'incluir' });
+  api('GET', `/c/${S.clube}/pedidos`).then((pd) => { const h = $('#pd'); if (!h || !pd.length) return; const E = { pendente: ['w', 'Pendente'], aceite: ['ok', 'Aceite'], recusado: ['no', 'Recusado'] };
+    h.innerHTML = `<div class="card" style="margin-bottom:12px"><b>Pedidos à Missão</b>${pd.slice(0, 6).map((x) => `<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px;font-size:14px"><span>${x.tipo === 'incluir' ? '➕ Incluir' : '➖ Retirar'} <b>${esc(x.nome)}</b>${x.resposta ? `<br><small style="color:var(--mut)">${esc(x.resposta)}</small>` : ''}</span><span class="tag ${E[x.estado][0]}">${E[x.estado][1]}</span></div>`).join('')}</div>`; }).catch(() => {});
   if (!ed) return;
   el.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => mPessoa(ps.find((x) => x.id === +r.dataset.id), ks)));
-  fab(() => mPessoa({ categoria: 'Desbravador', pagas: [], itens: [] }, ks));
+  if (missao()) fab(() => mPessoa({ categoria: 'Desbravador', pagas: [], itens: [] }, ks));
 };
 async function mPessoa(p, ks) {
   const its = await api('GET', `/c/${S.clube}/itens`);
   const ck = (n, l, on, v = '') => `<label class="ck"><input type="checkbox" name="${n}" ${v ? `value="${v}"` : ''} ${on ? 'checked' : ''}> ${esc(l)}</label>`;
   modal(`<h3>${p.id ? 'Editar acampante' : 'Novo acampante'}</h3><form id="f">
    <label>Nome completo</label><input name="nome" value="${esc(p.nome)}" required>
-   <div class="fl"><div><label>Categoria</label><select name="categoria">${['Desbravador', 'Direção'].map((c) => `<option ${p.categoria === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
-   <div><label>Telefone ${p.categoria === 'Direção' ? '' : 'do encarregado'}</label><input name="telefone" inputmode="tel" value="${esc(p.telefone)}"></div></div>
+   <div class="fl"><div><label>Categoria</label><select name="categoria" ${missao() ? '' : 'disabled'}>${['Desbravador', 'Direção'].map((c) => `<option ${p.categoria === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+   <div><label>Data de nascimento</label><input name="nascimento" type="date" value="${esc(p.nascimento)}"></div></div>
+   <label>Telefone ${p.categoria === 'Direção' ? '' : 'do encarregado'}</label><input name="telefone" inputmode="tel" value="${esc(p.telefone)}">
    <label>Nome do encarregado (pai/mãe)</label><input name="encarregado" value="${esc(p.encarregado)}" placeholder="Usado nas mensagens aos pais">
    <label>Já pagou</label><div class="fl">${ck('pago_inscricao', 'Inscrição', p.pago_inscricao)}${ck('pago_transporte', 'Transporte', p.pago_transporte)}${ks.map((k) => ck('pagas', k.nome, p.pagas.includes(k.id), k.id)).join('')}</div>
    <label>Documentos</label><div class="fl">${ck('autorizacao', 'Autorização dos pais', p.autorizacao)}${ck('ficha_medica', 'Ficha médica', p.ficha_medica)}</div>
    <label>Material que já tem</label><div class="fl">${its.map((i) => ck('itens', i.nome, p.itens.includes(i.id), i.id)).join('')}</div>
    <label>Observações (alergias, medicação…)</label><textarea name="obs">${esc(p.obs)}</textarea>
-   <div class="acts">${p.id ? '<button type="button" class="btn red" id="del">Apagar</button>' : ''}<button type="button" class="btn sec" onclick="fechar()">Cancelar</button><button class="btn">Guardar</button></div></form>`, (m) => {
-    if (p.id) $('#del', m).onclick = async () => { if (!confirm('Apagar ' + p.nome + '?')) return; await api('DELETE', `/c/${S.clube}/participantes/${p.id}`); fechar(); render(); };
+   <div class="acts">${p.id && missao() ? '<button type="button" class="btn red" id="del">Retirar</button>' : ''}${p.id && papel() === 'director' ? '<button type="button" class="btn sec" id="pr">Pedir para retirar</button>' : ''}<button type="button" class="btn sec" onclick="fechar()">Cancelar</button><button class="btn">Guardar</button></div></form>`, (m) => {
+    if ($('#del', m)) $('#del', m).onclick = async () => { if (!confirm('Retirar ' + p.nome + ' da lista do Campori?')) return; await api('DELETE', `/c/${S.clube}/participantes/${p.id}`); fechar(); render(); };
+    if ($('#pr', m)) $('#pr', m).onclick = () => mPedido({ tipo: 'retirar', participante_id: p.id, nome: p.nome });
     $('#f', m).onsubmit = async (e) => { e.preventDefault(); const f = e.target;
-      const b = { nome: f.nome.value, categoria: f.categoria.value, telefone: f.telefone.value, encarregado: f.encarregado.value, obs: f.obs.value,
+      const b = { nome: f.nome.value, nascimento: f.nascimento.value, ...(missao() ? { categoria: f.categoria.value } : {}), telefone: f.telefone.value, encarregado: f.encarregado.value, obs: f.obs.value,
         pagas: [...f.querySelectorAll('[name=pagas]:checked')].map((x) => +x.value), itens: [...f.querySelectorAll('[name=itens]:checked')].map((x) => +x.value) };
       ['pago_inscricao', 'pago_transporte', 'autorizacao', 'ficha_medica'].forEach((k) => (b[k] = f[k].checked ? 1 : 0));
       try { await api(p.id ? 'PUT' : 'POST', `/c/${S.clube}/participantes${p.id ? '/' + p.id : ''}`, b); fechar(); toast('Guardado'); render(); } catch (er) { toast(er.message, 1); } };
+  });
+}
+function mPedido(x) {
+  const inc = x.tipo === 'incluir';
+  modal(`<h3>${inc ? 'Pedir inclusão à Missão' : 'Pedir para retirar ' + esc(x.nome)}</h3><p class="sub">${inc ? 'As inscrições estão fechadas. A Missão analisa o pedido e, se aceitar, a pessoa aparece na sua lista.' : 'A Missão analisa o pedido. Até lá, a pessoa continua na lista.'}</p>
+   <form id="f">${inc ? `<label>Nome completo</label><input name="nome" required><div class="fl"><div><label>Categoria</label><select name="categoria"><option>Desbravador</option><option>Direção</option></select></div><div><label>Data de nascimento</label><input name="nascimento" type="date"></div></div>` : ''}
+   <label>Motivo</label><textarea name="motivo" placeholder="${inc ? 'Ex.: pagou a inscrição a 08/11 mas ficou fora da lista' : 'Ex.: desistiu, viagem da família'}" required></textarea>
+   <div class="acts"><button type="button" class="btn sec" onclick="fechar()">Cancelar</button><button class="btn">Enviar pedido</button></div></form>`, (m) => {
+    $('#f', m).onsubmit = async (e) => { e.preventDefault(); const f = e.target, b = { ...x, motivo: f.motivo.value };
+      if (inc) Object.assign(b, { nome: f.nome.value, categoria: f.categoria.value, nascimento: f.nascimento.value });
+      try { await api('POST', `/c/${S.clube}/pedidos`, b); fechar(); toast('Pedido enviado à Missão'); render(); } catch (er) { toast(er.message, 1); } };
   });
 }
 function mImportarLista() {
@@ -345,23 +365,55 @@ V.visao = async (el) => {
   if (papel() === 'director') return V.painel(el);
   const ls = await api('GET', '/visao'), ev = S.me.evento, M = papel() === 'missao';
   const f = ls.filter((c) => (!reg || c.regiao === reg) && (!busca || c.nome.toLowerCase().includes(busca.toLowerCase()))).sort((a, b) => b.alertas.length - a.alertas.length || a.nome.localeCompare(b.nome));
-  const s = (k) => f.reduce((a, c) => a + c[k], 0);
-  el.innerHTML = `<h1>Clubes</h1><p class="sub">${M ? 'Toda a Missão' : 'Região ' + esc(S.me.regiao?.nome)} · ${f.length} clubes · faltam ${dias(S.me.hoje, ev.inicio)} dias</p>
+  const s = (k) => f.reduce((a, c) => a + c[k], 0), npd = ls.reduce((a, c) => a + c.pedidos, 0);
+  el.innerHTML = `${npd ? `<div class="alert" style="cursor:pointer" id="vp">📨 <b>${npd} pedido(s)</b> de inclusão/retirada à espera de resposta. Toque para ver.</div>` : ''}<h1>Clubes</h1><p class="sub">${M ? 'Toda a Missão' : 'Região ' + esc(S.me.regiao?.nome)} · ${f.length} clubes · faltam ${dias(S.me.hoje, ev.inicio)} dias</p>
   <div class="grid"><div class="card kpi"><small>Acampantes</small><b>${s('n')}</b><i>${s('dbv')} dbv · ${s('dir')} direcção</i></div><div class="card kpi gold"><small>Pago</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))}</i></div>
    <div class="card kpi"><small>Checklist</small><b>${pct(s('feitas'), s('total'))}%</b></div><div class="card kpi red"><small>Clubes com alertas</small><b>${f.filter((c) => c.alertas.length).length}</b></div></div>
   <div class="tools" style="margin-top:12px"><input type="search" id="bu" placeholder="Procurar clube…" value="${esc(busca)}">${M ? `<select id="rg"><option value="">Todas as regiões</option>${[...new Set(ls.map((c) => c.regiao))].map((r) => `<option ${r === reg ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}</div>
   <div class="list">${f.map((c) => `<div class="row" data-id="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} acamp. · ${c.dir_nome ? esc(c.dir_nome) : '<span style="color:var(--red)">sem director</span>'}</small>
     <div style="display:flex;gap:10px;margin-top:6px"><div style="flex:1"><small style="color:var(--mut)">Pago ${c.pct_pago}%</small><div class="bar ${c.pct_pago < 40 ? 'r' : c.pct_pago < 80 ? 'o' : ''}"><span style="width:${c.pct_pago}%"></span></div></div><div style="flex:1"><small style="color:var(--mut)">Checklist ${pct(c.feitas, c.total)}%</small><div class="bar ${pct(c.feitas, c.total) < 40 ? 'r' : 'o'}"><span style="width:${pct(c.feitas, c.total)}%"></span></div></div></div>
-    <div>${c.alertas.map((a) => `<span class="tag no">${esc(a)}</span>`).join('')}</div></div>
+    <div>${c.pedidos ? `<span class="tag w">📨 ${c.pedidos} pedido(s)</span>` : ''}${c.alertas.map((a) => `<span class="tag no">${esc(a)}</span>`).join('')}</div></div>
     <div class="v">${c.dir_tel ? `<a class="tag ok" target="_blank" rel="noopener" href="${wa(c.dir_tel, `Maranata, ${c.dir_nome.split(' ')[0]}! Sobre o Campori do clube ${c.nome}: `)}">WhatsApp</a>` : ''}${M ? `<br><button class="tag b" data-dir="${c.id}">Acesso</button>` : ''}</div></div>`).join('') || '<div class="empty">Sem clubes.</div>'}</div>
-  <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button>${M ? '<button class="btn gold" id="im">Importar clubes</button><button class="btn sec" id="rgs">Regionais</button>' : ''}</div>`;
+  <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button><button class="btn sec" id="pds">📨 Pedidos</button>${M ? '<button class="btn gold" id="im">Importar clubes</button><button class="btn gold" id="ia">Importar acampantes (todos os clubes)</button><button class="btn sec" id="rgs">Regionais</button>' : ''}</div>`;
   $('#bu').oninput = (e) => { busca = e.target.value; clearTimeout(el._t); el._t = setTimeout(() => { render(); setTimeout(() => { const b = $('#bu'); b.focus(); b.setSelectionRange(99, 99); }); }, 350); };
   if ($('#rg')) $('#rg').onchange = (e) => { reg = e.target.value; render(); };
   $('#ex').onclick = () => baixar('clubes_campori.csv', csv(['Região', 'Clube', 'Director', 'Telefone', 'Acampantes', 'Desbravadores', 'Direcção', 'Tudo pago', '% pago', 'Sem autorização', 'Sem ficha', '% material', 'Checklist', 'Alertas'], f.map((c) => [c.regiao, c.nome, c.dir_nome, c.dir_tel, c.n, c.dbv, c.dir, c.pagos, c.pct_pago, c.sem_aut, c.sem_ficha, c.pct_material, `${c.feitas}/${c.total}`, c.alertas.join(' | ')])));
   el.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = (e) => { if (e.target.closest('a,button')) return; S.clube = +r.dataset.id; st.set('cs_clube', S.clube); location.hash = '#/painel'; }));
   el.querySelectorAll('[data-dir]').forEach((b) => (b.onclick = () => mAcesso(ls.find((c) => c.id === +b.dataset.dir))));
-  if (M) { $('#im').onclick = mImportar; $('#rgs').onclick = mRegionais; }
+  if (M) { $('#im').onclick = mImportar; $('#rgs').onclick = mRegionais; $('#ia').onclick = mImportarTodos; }
+  $('#pds').onclick = mPedidos; if ($('#vp')) $('#vp').onclick = mPedidos;
 };
+async function mPedidos() {
+  const ps = await api('GET', '/pedidos'), M = missao();
+  modal(`<h3>Pedidos dos clubes</h3><p class="sub">Inscrições fechadas: só a Missão inclui ou retira acampantes.</p>
+   <div class="list">${ps.map((x) => `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${x.tipo === 'incluir' ? '➕ Incluir' : '➖ Retirar'} ${esc(x.nome)}</b><span class="tag ${x.estado === 'pendente' ? 'w' : x.estado === 'aceite' ? 'ok' : 'no'}">${x.estado}</span></div>
+     <small style="color:var(--mut)">${esc(x.clube)} · ${esc(x.regiao)} · ${x.categoria}${x.nascimento ? ' · nasc. ' + dt(x.nascimento) + '/' + x.nascimento.slice(0, 4) : ''} · ${dt(x.criado_em.slice(0, 10))}</small>
+     ${x.motivo ? `<p style="margin:6px 0;font-size:14px">${esc(x.motivo)}</p>` : ''}${x.resposta ? `<p class="sub" style="margin:4px 0">Resposta: ${esc(x.resposta)}</p>` : ''}
+     ${M && x.estado === 'pendente' ? `<div class="acts" style="margin-top:8px"><button class="btn red sm" data-r="${x.id}">Recusar</button><button class="btn sm" data-a="${x.id}">Aceitar</button></div>` : ''}</div>`).join('') || '<p class="sub">Sem pedidos.</p>'}</div>
+   <div class="acts"><button class="btn sec" onclick="fechar();render()">Fechar</button></div>`, (m) => {
+    const responder = async (id, acao) => { const resposta = acao === 'recusar' ? prompt('Motivo da recusa (o director vai ver):') ?? '' : '';
+      try { await api('PUT', '/pedidos/' + id, { acao, resposta }); toast(acao === 'aceitar' ? 'Pedido aceite' : 'Pedido recusado'); mPedidos(); } catch (e) { toast(e.message, 1); } };
+    m.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => responder(b.dataset.a, 'aceitar')));
+    m.querySelectorAll('[data-r]').forEach((b) => (b.onclick = () => responder(b.dataset.r, 'recusar')));
+  });
+}
+function mImportarTodos() {
+  modal(`<h3>Importar acampantes de todos os clubes</h3><p class="sub">Um CSV com uma linha por pessoa e o cabeçalho:<br><b>Região;Clube;Igreja;Nome;Categoria;Nascimento</b><br>Clubes que não existam são criados. Nomes repetidos no mesmo clube são ignorados.</p>
+   <input type="file" id="fi" accept=".csv,.txt"><p id="pv" class="sub"></p><div class="acts"><button class="btn sec" onclick="fechar()">Cancelar</button><button class="btn" id="go" disabled>Importar</button></div>`, (m) => {
+    let L = [];
+    $('#fi', m).onchange = async (e) => { const t = e.target.files[0] && (await e.target.files[0].text()); if (!t) return;
+      const R = t.replace(/\r/g, '').split('\n').filter((l) => l.trim()), sep = R[0].includes(';') ? ';' : ',', n = (x) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
+      const cab = R[0].split(sep).map(n), ix = (k) => cab.findIndex((h) => h.startsWith(k));
+      const I = { regiao: ix('regiao'), clube: ix('clube'), igreja: ix('igreja'), nome: ix('nome'), categoria: Math.max(ix('categ'), ix('func')), nascimento: ix('nasc') };
+      L = R.slice(1).map((l, i) => { const v = l.split(sep).map((x) => x.trim().replace(/^"|"$/g, '')); return { linha: i + 2, ...Object.fromEntries(Object.entries(I).map(([k, j]) => [k, j >= 0 ? v[j] || '' : ''])) }; });
+      $('#pv', m).textContent = `${L.length} pessoas em ${new Set(L.map((l) => l.regiao + '|' + l.clube)).size} clubes.`; $('#go', m).disabled = !L.length; };
+    $('#go', m).onclick = async () => { const b = $('#go', m); b.disabled = true; const T = { criados: 0, repetidos: 0, clubes_novos: 0, erros: [] };
+      try { for (let i = 0; i < L.length; i += 300) { b.textContent = `A importar… ${Math.min(i + 300, L.length)}/${L.length}`; const r = await api('POST', '/importar-acampantes', { linhas: L.slice(i, i + 300) }); for (const k of ['criados', 'repetidos', 'clubes_novos']) T[k] += r[k]; T.erros.push(...r.erros); }
+        S.clubes = await api('GET', '/clubes');
+        modal(`<h3>Importação concluída</h3><p>✅ ${T.criados} acampantes · ${T.clubes_novos} clubes novos · ${T.repetidos} repetidos ignorados</p>${T.erros.length ? `<div class="alert">${T.erros.slice(0, 30).map(esc).join('<br>')}${T.erros.length > 30 ? '<br>…' : ''}</div>` : ''}<div class="acts"><button class="btn" onclick="fechar();render()">Fechar</button></div>`);
+      } catch (e) { toast(e.message, 1); b.disabled = false; b.textContent = 'Importar'; } };
+  });
+}
 function mostraSenha(nome, r, tel) {
   modal(`<h3>Acesso de ${esc(nome)}</h3><p>Endereço: <b>${location.host}</b><br>Login: <b>${esc(r.login)}</b><br>Senha provisória: <b style="font-size:22px">${esc(r.senha)}</b></p><p class="sub">No primeiro acesso é pedida uma senha nova.</p>
    <div class="acts"><a class="btn green" target="_blank" rel="noopener" href="${wa(tel, `Maranata, ${nome.split(' ')[0]}!\nO seu acesso ao *Campori 2026*:\n${location.origin}\nLogin: ${r.login}\nSenha: ${r.senha}`)}">${IC.wa} Enviar por WhatsApp</a><button class="btn sec" onclick="fechar();render()">Fechar</button></div>`);
