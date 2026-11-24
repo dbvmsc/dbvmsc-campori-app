@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '4.6';
+const VERSAO = '4.6.1';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -93,11 +93,11 @@ function render() {
   if (!S.me) return;
   const r = rota(), u = S.me.user, escuro = document.documentElement.dataset.tema === 'escuro';
   $('#app').innerHTML = `${navigator.onLine ? '' : '<div class="off">Sem internet</div>'}
-  <header class="top"><img class="logo" src="/logo.png" alt=""><div class="tt" id="eu" style="cursor:pointer"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
+  <header class="top"><img class="logo" src="/logo.png" alt=""><div class="tt"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
    ${coord() ? `<button class="ib" id="lp" title="Procurar">${IC.lupa}</button>` : `<button class="ib" id="sn" title="Avisos">${IC.sino}${S.naoLidos ? `<span class="dot">${S.naoLidos}</span>` : ''}</button>`}<button class="ib" id="bt" title="Tema">${escuro ? IC.sol : IC.lua}</button><button class="sair" id="bs">${IC.sair}<span>Sair</span></button></header>
   <div class="wrap"><nav class="side">${[...abas()].sort((a, b) => (b[0] === 'painel') - (a[0] === 'painel')).map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
   <nav class="nav">${abas().map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}${k === 'painel' ? ' centro' : ''}">${k === 'painel' ? `<span class="bola">${IC[k]}</span>` : IC[k]}${n}</a>`).join('')}</nav>`;
-  $('#bs').onclick = () => sair(); $('#eu').onclick = () => mSenha(false);
+  $('#bs').onclick = () => sair();
   if ($('#lp')) $('#lp').onclick = mProcurar;
   if ($('#sn')) $('#sn').onclick = () => (location.hash = '#/avisos');
   $('#bt').onclick = () => { st.set('cs_tema', escuro ? 'claro' : 'escuro'); tema(); render(); };
@@ -437,6 +437,8 @@ V.visao = async (el) => {
   el.querySelectorAll('[data-dir]').forEach((b) => (b.onclick = () => mAcesso(ls.find((c) => c.id === +b.dataset.dir))));
   if (M) { $('#im').onclick = mImportar; $('#rgs').onclick = mRegionais; $('#cdn').onclick = mCoordenacao; $('#ic').onclick = mImportarContactos; $('#ia').onclick = mImportarTodos; }
   $('#pds').onclick = mPedidos; if ($('#vp')) $('#vp').onclick = mPedidos;
+  el.insertAdjacentHTML('beforeend', '<p class="sub noprint" style="text-align:center;margin-top:18px"><a href="#" id="cs">Trocar a minha senha</a></p>');
+  $('#cs', el).onclick = (e) => { e.preventDefault(); mSenha(false); };
 };
 
 
