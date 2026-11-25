@@ -1,5 +1,5 @@
 // Campori — versão simples (Cloudflare Worker + D1)
-const VERSAO = '4.6.1';
+const VERSAO = '4.7';
 
 const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const hoje = () => new Date(Date.now() + 3600e3).toISOString().slice(0, 10); // hora de Angola
@@ -57,24 +57,29 @@ const desceOficial = (DB, cid) => DB.prepare('UPDATE clubes SET inscritos_oficia
 
 const PRAZO = `date(?, printf('%+d days', -m.dias_antes))`;
 
-async function metricas(DB, ids) {
+async function metricas(DB, ids, coord = false) {
   if (!ids.length) return {};
   if (ids.length > 80) { // o D1 aceita no máximo 100 valores por consulta: calcular em blocos
     const out = {};
-    for (let i = 0; i < ids.length; i += 80) Object.assign(out, await metricas(DB, ids.slice(i, i + 80)));
+    for (let i = 0; i < ids.length; i += 80) Object.assign(out, await metricas(DB, ids.slice(i, i + 80), coord));
     return out;
   }
   const ev = await DB.prepare('SELECT * FROM evento WHERE id=1').first();
   const q = ids.map(() => '?').join(','), d = hoje();
   const VAL = `CASE WHEN p.categoria='Desbravador' THEN k.valor_dbv ELSE k.valor_dir END`;
-  const [p, t, e1, e2, i1, i2, fc] = await DB.batch([
+  const EXTRA = `(SELECT COUNT(*) FROM contribuicoes k WHERE k.clube_id=p.clube_id AND ${VAL}>0) =
+        (SELECT COUNT(*) FROM contrib_pagas x JOIN contribuicoes k ON k.id=x.contribuicao_id WHERE x.participante_id=p.id AND ${VAL}>0)`;
+  const [p, t, e1, e2, i1, i2, fc, rp] = await DB.batch([
     DB.prepare(`SELECT clube_id, COUNT(*) n, SUM(categoria='Desbravador') dbv, SUM(categoria<>'Desbravador') dir,
       SUM(pago_inscricao AND pago_transporte AND
         (SELECT COUNT(*) FROM contribuicoes k WHERE k.clube_id=p.clube_id AND ${VAL}>0) =
         (SELECT COUNT(*) FROM contrib_pagas x JOIN contribuicoes k ON k.id=x.contribuicao_id WHERE x.participante_id=p.id AND ${VAL}>0)) pagos,
+      SUM(pago_inscricao AND transp_validado AND ${EXTRA}) pagos_v,
       SUM(pago_inscricao * CASE WHEN categoria='Desbravador' THEN ? ELSE ? END + pago_transporte * ?) recebido,
+      SUM(pago_inscricao * CASE WHEN categoria='Desbravador' THEN ? ELSE ? END + COALESCE(transp_validado,0) * ?) recebido_v,
+      SUM(pago_transporte) transp_rec, SUM(transp_remessa IS NOT NULL AND COALESCE(transp_validado,0)=0) transp_rep, SUM(COALESCE(transp_validado,0)) transp_val,
       SUM(categoria='Desbravador' AND autorizacao=0) sem_aut, SUM(ficha_medica=0) sem_ficha
-      FROM participantes p WHERE clube_id IN (${q}) GROUP BY clube_id`).bind(ev.taxa_dbv, ev.taxa_dir, ev.transporte, ...ids),
+      FROM participantes p WHERE clube_id IN (${q}) GROUP BY clube_id`).bind(ev.taxa_dbv, ev.taxa_dir, ev.transporte, ev.taxa_dbv, ev.taxa_dir, ev.transporte, ...ids),
     DB.prepare(`SELECT c.id clube_id, COUNT(*) total, SUM(COALESCE(t.feita,0)) feitas,
       SUM(COALESCE(t.feita,0)=0 AND ${PRAZO} < ?) atrasadas
       FROM clubes c CROSS JOIN tarefa_modelo m LEFT JOIN tarefas t ON t.clube_id=c.id AND t.ordem=m.ordem
@@ -84,12 +89,15 @@ async function metricas(DB, ids) {
     DB.prepare(`SELECT clube_id, COUNT(*) itens FROM itens WHERE clube_id IN (${q}) GROUP BY clube_id`).bind(...ids),
     DB.prepare(`SELECT p.clube_id, COUNT(*) tem FROM itens_tem t JOIN participantes p ON p.id=t.participante_id JOIN itens i ON i.id=t.item_id WHERE p.clube_id IN (${q}) GROUP BY p.clube_id`).bind(...ids),
     DB.prepare(`SELECT p.clube_id, COUNT(*) fichas FROM fichas f JOIN participantes p ON p.id=f.participante_id WHERE f.completa=1 AND p.clube_id IN (${q}) GROUP BY p.clube_id`).bind(...ids),
+    DB.prepare(`SELECT clube_id, COUNT(*) rem_pend FROM remessas WHERE estado='pendente' AND clube_id IN (${q}) GROUP BY clube_id`).bind(...ids),
   ]);
   const out = {};
-  for (const id of ids) out[id] = { n: 0, dbv: 0, dir: 0, pagos: 0, recebido: 0, sem_aut: 0, sem_ficha: 0, total: 0, feitas: 0, atrasadas: 0, devido_extra: 0, recebido_extra: 0, itens: 0, tem: 0, fichas: 0 };
-  for (const r of [p, t, e1, e2, i1, i2, fc].flatMap((x) => x.results)) for (const [k, v] of Object.entries(r)) out[r.clube_id][k] = v ?? 0;
+  for (const id of ids) out[id] = { n: 0, dbv: 0, dir: 0, pagos: 0, pagos_v: 0, recebido: 0, recebido_v: 0, transp_rec: 0, transp_rep: 0, transp_val: 0, rem_pend: 0, sem_aut: 0, sem_ficha: 0, total: 0, feitas: 0, atrasadas: 0, devido_extra: 0, recebido_extra: 0, itens: 0, tem: 0, fichas: 0 };
+  for (const r of [p, t, e1, e2, i1, i2, fc, rp].flatMap((x) => x.results)) for (const [k, v] of Object.entries(r)) out[r.clube_id][k] = v ?? 0;
   for (const id of ids) {
     const o = out[id];
+    // a Missão e as Regiões só contam o transporte validado; o director vê o que recolheu
+    if (coord) { o.pagos = o.pagos_v; o.recebido = o.recebido_v; }
     o.devido = o.dbv * ev.taxa_dbv + o.dir * ev.taxa_dir + o.n * ev.transporte + o.devido_extra;
     o.recebido += o.recebido_extra;
     o.pct_material = o.n && o.itens ? Math.round((o.tem / (o.n * o.itens)) * 100) : 0;
@@ -191,7 +199,7 @@ async function api(req, DB, url) {
     const w = u.papel === 'regional' ? 'WHERE c.regiao_id=' + +u.regiao_id : '';
     const cl = (await DB.prepare(`SELECT c.id, c.nome, c.regiao_id, c.inscritos_oficial, c.contacto_nome, c.contacto_tel, r.nome regiao, d.id dir_id, d.nome dir_nome, d.telefone dir_tel, d.email dir_email, COALESCE(d.nome, c.contacto_nome) ct_nome, COALESCE(d.telefone, c.contacto_tel) ct_tel
       FROM clubes c JOIN regioes r ON r.id=c.regiao_id LEFT JOIN utilizadores d ON d.clube_id=c.id AND d.papel='director' AND COALESCE(d.funcao,'director')='director' AND d.ativo=1 ${w} GROUP BY c.id ORDER BY r.nome, c.nome`).all()).results;
-    const m = await metricas(DB, cl.map((c) => c.id));
+    const m = await metricas(DB, cl.map((c) => c.id), true);
     const pend = Object.fromEntries((await DB.prepare("SELECT clube_id, COUNT(*) n FROM pedidos WHERE estado='pendente' GROUP BY clube_id").all()).results.map((r) => [r.clube_id, r.n]));
     return json(cl.map((c) => ({ ...c, ...m[c.id], pedidos: pend[c.id] || 0 })));
   }
@@ -300,7 +308,7 @@ async function api(req, DB, url) {
     if (p[0] === 'secretaria' && M === 'GET') {
       const cl = (await DB.prepare(`SELECT c.id, c.nome, c.inscritos_oficial, c.regiao_id, r.nome regiao, d.id dir_id, COALESCE(d.nome, c.contacto_nome) dir_nome, COALESCE(d.telefone, c.contacto_tel) dir_tel FROM clubes c JOIN regioes r ON r.id=c.regiao_id
         LEFT JOIN utilizadores d ON d.clube_id=c.id AND d.papel='director' AND COALESCE(d.funcao,'director')='director' AND d.ativo=1 ${wr} GROUP BY c.id`).all()).results;
-      const m = await metricas(DB, cl.map((c) => c.id));
+      const m = await metricas(DB, cl.map((c) => c.id), true);
       const avent = Object.fromEntries((await DB.prepare("SELECT clube_id, COUNT(*) n FROM participantes WHERE obs LIKE '%Aventureiro%' GROUP BY clube_id").all()).results.map((r) => [r.clube_id, r.n]));
       const pend = Object.fromEntries((await DB.prepare("SELECT clube_id, COUNT(*) n FROM pedidos WHERE estado='pendente' GROUP BY clube_id").all()).results.map((r) => [r.clube_id, r.n]));
       const casos = (await DB.prepare(`SELECT k.*, c.nome clube, r.nome regiao, c.regiao_id, (SELECT COUNT(*) FROM caso_notas n WHERE n.caso_id=k.id) notas
@@ -318,6 +326,7 @@ async function api(req, DB, url) {
         if (!c.dir_id) add(c, 'acesso', 'Director ainda sem acesso à app', 'Normal');
         if (avent[c.id]) add(c, 'aventureiros', `${avent[c.id]} inscrito(s) como Aventureiro: confirmar se podem participar`, 'Normal');
         if (pend[c.id]) add(c, 'pedidos', `${pend[c.id]} pedido(s) de inclusão/retirada por responder`, 'Alta');
+        if (x.rem_pend) add(c, 'pagamentos', `Transporte reportado pelo clube à espera de validação (${x.transp_rep} pessoa(s))`, 'Alta');
         if (x.alertas.some((a) => a.includes('por pagar'))) add(c, 'pagamentos', `${x.n - x.pagos} acampante(s) com pagamentos em falta após o prazo`, 'Alta');
       }
       const ordem = { Alta: 0, Normal: 1 };
@@ -354,6 +363,39 @@ async function api(req, DB, url) {
       }
       if (M === 'DELETE') { await DB.batch([DB.prepare('DELETE FROM caso_notas WHERE caso_id=?').bind(+p[1]), DB.prepare('DELETE FROM casos WHERE id=?').bind(+p[1])]); return json({ ok: true }); }
     }
+  }
+
+  // ---- REMESSAS do transporte: lista (Missão/Regional) e validação (Missão) ----
+  if (p[0] === 'remessas') {
+    if (u.papel === 'director') throw new E('Sem permissão', 403);
+    if (M === 'GET') {
+      const w = u.papel === 'regional' ? 'AND c.regiao_id=' + +u.regiao_id : '';
+      const rs = (await DB.prepare(`SELECT x.*, c.nome clube, r.nome regiao, COALESCE(d.nome, c.contacto_nome) dir_nome, COALESCE(d.telefone, c.contacto_tel) dir_tel FROM remessas x JOIN clubes c ON c.id=x.clube_id JOIN regioes r ON r.id=c.regiao_id
+        LEFT JOIN utilizadores d ON d.clube_id=c.id AND d.papel='director' AND COALESCE(d.funcao,'director')='director' AND d.ativo=1
+        WHERE (x.estado='pendente' OR x.validado_em > datetime('now','-30 days')) ${w} GROUP BY x.id ORDER BY x.estado<>'pendente', x.id DESC`).all()).results;
+      const ids = rs.filter((x) => x.estado === 'pendente').map((x) => x.id), pes = {};
+      for (let i = 0; i < ids.length; i += 80) {
+        const b = ids.slice(i, i + 80);
+        for (const q of (await DB.prepare(`SELECT id, nome, categoria, transp_remessa FROM participantes WHERE transp_remessa IN (${b.map(() => '?')}) ORDER BY nome`).bind(...b).all()).results) (pes[q.transp_remessa] ||= []).push(q);
+      }
+      return json(rs.map((x) => ({ ...x, pessoas: pes[x.id] || [] })));
+    }
+    if (!missao) throw new E('Só a Missão valida', 403);
+    const x = await DB.prepare("SELECT * FROM remessas WHERE id=? AND estado='pendente'").bind(+p[1]).first();
+    if (!x) throw new E('Remessa não encontrada ou já tratada', 404);
+    const b = await body(), nota = String(b.nota || '').trim().slice(0, 300), ev = await DB.prepare('SELECT transporte FROM evento WHERE id=1').first();
+    if (b.acao === 'recusar') {
+      await DB.batch([DB.prepare('UPDATE participantes SET transp_remessa=NULL WHERE transp_remessa=?').bind(x.id),
+        DB.prepare("UPDATE remessas SET estado='recusada', nota=?, validado_por=?, validado_em=datetime('now') WHERE id=?").bind(nota, u.nome, x.id)]);
+      return json({ ok: true });
+    }
+    const fora = (Array.isArray(b.excluir) ? b.excluir : []).map(Number);
+    const st = [DB.prepare('UPDATE participantes SET transp_validado=1 WHERE transp_remessa=?').bind(x.id)];
+    for (const pid of fora) st.push(DB.prepare('UPDATE participantes SET transp_validado=0, transp_remessa=NULL WHERE id=? AND transp_remessa=?').bind(pid, x.id));
+    st.push(DB.prepare("UPDATE remessas SET estado='validada', nota=?, validado_por=?, validado_em=datetime('now'), n_validados=(SELECT COUNT(*) FROM participantes WHERE transp_remessa=? AND transp_validado=1) WHERE id=?").bind(nota, u.nome, x.id, x.id));
+    await DB.batch(st);
+    const r = await DB.prepare('SELECT n_validados FROM remessas WHERE id=?').bind(x.id).first();
+    return json({ ok: true, validados: r.n_validados, valor: r.n_validados * ev.transporte });
   }
 
   // ---- contacto do director de cada clube ----
@@ -483,7 +525,7 @@ async function api(req, DB, url) {
     if (p[2] === 'painel') {
       const prox = (await DB.prepare(`SELECT m.titulo, ${PRAZO} prazo FROM tarefa_modelo m LEFT JOIN tarefas t ON t.clube_id=? AND t.ordem=m.ordem WHERE COALESCE(t.feita,0)=0 ORDER BY m.ordem LIMIT 3`).bind(ev.inicio, c.id).all()).results;
       const contrib = (await DB.prepare('SELECT * FROM contribuicoes WHERE clube_id=? ORDER BY id').bind(c.id).all()).results;
-      return json({ clube: c, m: (await metricas(DB, [c.id]))[c.id], proximas: prox, contribuicoes: contrib, evento: ev, hoje: hoje(), editar: escrever });
+      return json({ clube: c, m: (await metricas(DB, [c.id], u.papel !== 'director'))[c.id], proximas: prox, contribuicoes: contrib, evento: ev, hoje: hoje(), editar: escrever });
     }
     if (p[2] === 'contribuicoes') {
       if (M === 'GET') return json((await DB.prepare('SELECT * FROM contribuicoes WHERE clube_id=? ORDER BY id').bind(c.id).all()).results);
@@ -587,6 +629,15 @@ async function api(req, DB, url) {
       }
       return json({ ok: true });
     }
+    if (p[2] === 'remessas') {
+      if (M === 'GET') return json((await DB.prepare('SELECT * FROM remessas WHERE clube_id=? ORDER BY id DESC LIMIT 30').bind(c.id).all()).results);
+      if (M !== 'POST' || !escrever) throw new E('Sem permissão', 403);
+      const ps = (await DB.prepare('SELECT id FROM participantes WHERE clube_id=? AND pago_transporte=1 AND transp_remessa IS NULL').bind(c.id).all()).results;
+      if (!ps.length) throw new E('Não há transporte recolhido por reportar');
+      const id = (await DB.prepare('INSERT INTO remessas (clube_id,n,valor,criado_por) VALUES (?,?,?,?)').bind(c.id, ps.length, ps.length * ev.transporte, u.nome).run()).meta.last_row_id;
+      await DB.prepare('UPDATE participantes SET transp_remessa=? WHERE clube_id=? AND pago_transporte=1 AND transp_remessa IS NULL').bind(id, c.id).run();
+      return json({ id, n: ps.length, valor: ps.length * ev.transporte });
+    }
     if (p[2] === 'participantes') {
       if (M === 'GET') {
         const [ps, pg, it] = await DB.batch([
@@ -610,6 +661,14 @@ async function api(req, DB, url) {
       const b = await body(), F = ['nome', 'nascimento', 'telefone', 'encarregado', 'pago_inscricao', 'pago_transporte', 'autorizacao', 'ficha_medica', 'obs', ...(missao ? ['categoria'] : [])];
       const v = {}; for (const k of F) if (b[k] !== undefined) v[k] = k.startsWith('pago') || k === 'autorizacao' || k === 'ficha_medica' ? (+b[k] ? 1 : 0) : k === 'nascimento' ? dataISO(b[k]) : k === 'nome' ? limpaNome(b[k]) : String(b[k]).trim().slice(0, 300);
       if (v.categoria && !['Desbravador', 'Direção'].includes(v.categoria)) throw new E('Categoria inválida');
+      // transporte já reportado à Missão: o director não o pode desmarcar; a Missão pode (anula também a validação)
+      if (M === 'PUT' && v.pago_transporte === 0) {
+        const cur = await DB.prepare('SELECT transp_remessa FROM participantes WHERE id=? AND clube_id=?').bind(+p[3], c.id).first();
+        if (cur?.transp_remessa != null) {
+          if (!missao) { if (Object.keys(v).length === 1) throw new E('Transporte já reportado à Missão: só a Missão pode alterar'); delete v.pago_transporte; }
+          else { v.transp_remessa = null; v.transp_validado = 0; }
+        }
+      }
       const ks = Object.keys(v);
       let pid = +p[3];
       if (M === 'POST') {

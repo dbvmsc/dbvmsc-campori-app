@@ -1,9 +1,10 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '4.6.1';
+const VERSAO = '4.7';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
+  pagamentos: I('<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/>'),
   pessoas: I('<circle cx="9" cy="7" r="4"/><path d="M2 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/><path d="M16 3.1a4 4 0 0 1 0 7.8M22 21v-2a4 4 0 0 0-3-3.9"/>'),
   tarefas: I('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>'),
   pais: I('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
@@ -37,13 +38,26 @@ function baixar(n, txt) { const a = document.createElement('a'); a.href = URL.cr
 const csv = (c, l) => [c, ...l].map((r) => r.map((v) => { v = String(v ?? ''); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(';')).join('\n');
 
 const S = { token: st.get('cs_token'), me: null, clube: null, clubes: [] };
+// as leituras ficam guardadas: filtros e buscas redesenham sem voltar ao servidor
+const CACHE = new Map(); let usarCache = false;
 async function api(m, p, b) {
+  if (m === 'GET' && usarCache && CACHE.has(p)) return CACHE.get(p);
   let r; try { r = await fetch('/api' + p, { method: m, headers: { 'content-type': 'application/json', ...(S.token ? { authorization: 'Bearer ' + S.token } : {}) }, body: b ? JSON.stringify(b) : undefined }); }
   catch { throw new Error('Sem ligação à internet.'); }
   const d = await r.json().catch(() => ({}));
   if (r.status === 401 && S.token && p !== '/login') { sair(true); throw new Error(d.erro); }
   if (!r.ok) throw new Error(d.erro || 'Erro ' + r.status);
+  if (m === 'GET') CACHE.set(p, d); else CACHE.clear();
   return d;
+}
+const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+// esconde as linhas que não correspondem à busca, sem redesenhar nada
+function filtraLinhas(box, q, extra = () => true) {
+  const n = norm(q).trim(); let k = 0;
+  box.querySelectorAll('[data-txt]').forEach((r) => { const ok = (!n || r.dataset.txt.includes(n)) && extra(r, !!n); r.hidden = !ok; k += ok; });
+  let v = box.querySelector(':scope > .semres');
+  if (!k && n) { if (!v) { v = document.createElement('div'); v.className = 'empty semres'; v.textContent = 'Nada encontrado.'; box.append(v); } v.hidden = false; } else if (v) v.hidden = true;
+  return k;
 }
 const papel = () => S.me?.user.papel;
 const missao = () => papel() === 'missao';
@@ -56,7 +70,7 @@ tema();
 async function iniciar() {
   if (!S.token) return (await api('GET', '/estado').catch(() => ({ configurado: 1 }))).configurado ? vLogin() : vSetup();
   try { S.me = await api('GET', '/me'); S.clubes = await api('GET', '/clubes'); } catch (e) { return; }
-  if (S.me.user.papel === 'director') api('GET', '/avisos').then((a) => { S.naoLidos = a.filter((x) => !x.lido_em).length; if (S.naoLidos) render(); }).catch(() => {});
+  if (S.me.user.papel === 'director') api('GET', '/avisos').then((a) => { S.naoLidos = a.filter((x) => !x.lido_em).length; if (S.naoLidos) renderTudo(); }).catch(() => {});
   const g = +st.get('cs_clube');
   S.clube = papel() === 'director' ? S.me.user.clube_id : S.clubes.some((c) => c.id === g) ? g : null;
   if (!location.hash) location.hash = papel() === 'director' ? '#/painel' : '#/visao';
@@ -88,9 +102,23 @@ function abas() { // o Painel fica sempre ao centro da barra de baixo
     ? [['pessoas', 'Acampantes'], ['pais', 'Pais'], ['painel', 'Painel'], ['secretaria', 'Secretaria'], ['mais', 'Mais']]
     : [['visao', 'Clubes'], ['secretaria', 'Secretaria'], ['painel', 'Painel'], ['avisos', 'Avisos'], ['documentos', 'Documentos']];
 }
-const naBarra = (r, k) => r === k || (r === 'clube' && k === 'visao') || (papel() === 'director' && ['material', 'tarefas', 'avisos', 'documentos'].includes(r) && k === 'mais');
+const naBarra = (r, k) => r === k || (r === 'clube' && k === 'visao') || (papel() === 'director' && ['pagamentos', 'material', 'tarefas', 'avisos', 'documentos'].includes(r) && k === 'mais');
+let ultimaRota = '';
+const vistaAtual = () => { const r = rota(); return coord() ? (r === 'painel' ? V.geral : r === 'clube' ? V.clube : V[r] || V.geral) : r === 'secretaria' ? V.secClube : V[r] || V.painel; };
+// redesenha só o conteúdo: sem tela em branco, mantém o scroll e o cursor
+async function refrescar(rede = true) {
+  const main = $('#main'), y = scrollY, a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
+  usarCache = !rede;
+  try { await vistaAtual()(main); } catch (e) { toast(e.message, 1); } finally { usarCache = false; }
+  scrollTo(0, y);
+  if (id && a.matches('input,textarea')) { const b = document.getElementById(id); if (b && b !== document.activeElement) { b.focus(); try { b.setSelectionRange(pos, pos); } catch {} } }
+}
+const redesenhar = () => refrescar(false);
+const renderTudo = () => { ultimaRota = ''; render(); };
 function render() {
   if (!S.me) return;
+  if (location.hash === ultimaRota && $('#main')) return refrescar(true);
+  ultimaRota = location.hash;
   const r = rota(), u = S.me.user, escuro = document.documentElement.dataset.tema === 'escuro';
   $('#app').innerHTML = `${navigator.onLine ? '' : '<div class="off">Sem internet</div>'}
   <header class="top"><img class="logo" src="/logo.png" alt=""><div class="tt"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
@@ -100,13 +128,12 @@ function render() {
   $('#bs').onclick = () => sair();
   if ($('#lp')) $('#lp').onclick = mProcurar;
   if ($('#sn')) $('#sn').onclick = () => (location.hash = '#/avisos');
-  $('#bt').onclick = () => { st.set('cs_tema', escuro ? 'claro' : 'escuro'); tema(); render(); };
+  $('#bt').onclick = () => { st.set('cs_tema', escuro ? 'claro' : 'escuro'); tema(); renderTudo(); };
   const main = $('#main');
-  const v = coord() ? (r === 'painel' ? V.geral : r === 'clube' ? V.clube : V[r] || V.geral) : r === 'secretaria' ? V.secClube : V[r] || V.painel;
-  v(main).catch((e) => (main.innerHTML = `<div class="alert">${esc(e.message)}</div>`));
+  vistaAtual()(main).catch((e) => (main.innerHTML = `<div class="alert">${esc(e.message)}</div>`));
   scrollTo(0, 0);
 }
-addEventListener('hashchange', render); addEventListener('online', render); addEventListener('offline', render);
+addEventListener('hashchange', render); addEventListener('online', renderTudo); addEventListener('offline', renderTudo);
 (() => { let x = null, y; // deslizar entre abas
   addEventListener('touchstart', (e) => { x = e.target.closest('.modal,input,select,textarea,.marcos') ? null : e.touches[0].clientX; y = e.touches[0].clientY; }, { passive: true });
   addEventListener('touchend', (e) => { if (x == null || !S.me || !$('#modal').hidden) return; const dx = e.changedTouches[0].clientX - x, dy = e.changedTouches[0].clientY - y; x = null;
@@ -133,6 +160,9 @@ V.painel = async (el) => {
    <a class="card kpi" href="${lk('pessoas')}" style="text-decoration:none"><small>Acampantes</small><b>${m.n}</b><i>${m.dbv} dbv · ${m.dir} direcção</i></a>
    <a class="card kpi ${m.pagos >= m.n && m.n ? 'green' : 'gold'}" href="${lk('pessoas')}" style="text-decoration:none"><small>Com tudo pago</small><b>${m.pagos}/${m.n}</b><i>${kz(m.recebido)} de ${kz(m.devido)}</i></a>
   </div>
+  <a class="card" href="${lk('pagamentos')}" style="display:block;margin-top:12px;text-decoration:none;color:inherit"><b>🚌 Transporte</b> <small class="sub">ver pagamentos →</small>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><span class="tag ok">Recolhido ${m.transp_rec}</span><span class="tag w">Reportado ${m.transp_rep}</span><span class="tag ok">✓✓ Validado ${m.transp_val}</span>${m.transp_rec - m.transp_rep - m.transp_val > 0 ? `<span class="tag no">Por reportar ${m.transp_rec - m.transp_rep - m.transp_val}</span>` : ''}</div>
+   <small class="sub">Recolhido ${kz(m.transp_rec * ev.transporte)} · validado pela Missão ${kz(m.transp_val * ev.transporte)}</small></a>
   <div class="card" style="margin-top:12px">${barra('Pagamentos', m.pct_pago)}${barra('Autorizações dos pais', pct(m.dbv - m.sem_aut, m.dbv))}${barra('Fichas médicas', pct(m.n - m.sem_ficha, m.n))}${barra('Fichas individuais completas', pct(m.fichas, m.n))}${barra('Material individual', m.pct_material)}${barra('Checklist', pct(m.feitas, m.total))}</div>
   <p class="sub" style="margin-top:10px">💰 Cada acampante paga: inscrição (${kz(ev.taxa_dbv)} dbv / ${kz(ev.taxa_dir)} direcção) + transporte ${kz(ev.transporte)}${d.contribuicoes.map((k) => ` + ${esc(k.nome)} (${k.valor_dbv === k.valor_dir ? kz(k.valor_dbv) : kz(k.valor_dbv) + ' / ' + kz(k.valor_dir)})`).join('')}.${d.editar ? ` <a href="${lk('pessoas')}" id="lc">Contribuições do clube</a>` : ''}</p>
   ${d.proximas.length ? `<h2>A seguir na checklist</h2><div class="list">${d.proximas.map((t) => { const k = dias(d.hoje, t.prazo); return `<a class="row" href="${lk('tarefas')}" style="text-decoration:none"><div class="t"><b>${esc(t.titulo)}</b></div><span class="tag ${k < 0 ? 'no' : k <= 7 ? 'w' : 'b'}">${k < 0 ? 'Atrasada' : dt(t.prazo)}</span></a>`; }).join('')}</div>` : ''}
@@ -141,7 +171,27 @@ V.painel = async (el) => {
 };
 
 // ---------- ACAMPANTES ----------
-let filtro = '', destaque = 0;
+let filtro = '', destaque = 0, buscaP = '';
+// transporte: 0 por pagar · 1 recolhido pelo director · 2 reportado à Missão · 3 validado pela Missão
+const estT = (p) => (!p.pago_transporte ? 0 : p.transp_validado ? 3 : p.transp_remessa != null ? 2 : 1);
+const ROT_T = ['por pagar', 'recolhido', 'reportado', 'validado'];
+const tagT = (p, a) => { const e = estT(p); return `<button class="tag ${['no', 'ok', 'w', 'ok'][e]}" ${a}>${['✗', '✓', '⏳', '✓✓'][e]} Transporte${e ? ' · ' + ROT_T[e] : ''}</button>`; };
+// marcar/desmarcar um pagamento ou documento: muda na hora, grava por trás; se falhar volta atrás
+async function alterna(p, b, pinta) {
+  if (!pode()) return;
+  const antes = JSON.parse(JSON.stringify(p)); let url = `/c/${S.clube}/participantes/${p.id}`, corpo;
+  if (b.dataset.k) {
+    const k = b.dataset.k;
+    if (k === 'pago_transporte' && p.transp_remessa != null && !missao()) return toast('Transporte já reportado à Missão: só a Missão pode alterar', 1);
+    p[k] = p[k] ? 0 : 1; if (k === 'pago_transporte' && !p[k]) { p.transp_remessa = null; p.transp_validado = 0; }
+    corpo = { [k]: p[k] };
+  } else {
+    const c = +b.dataset.c, on = p.pagas.includes(c);
+    p.pagas = on ? p.pagas.filter((x) => x !== c) : [...p.pagas, c]; url += '/contrib/' + c; corpo = { sim: on ? 0 : 1 };
+  }
+  pinta(p);
+  try { await api('PUT', url, corpo); } catch (er) { Object.assign(p, antes); pinta(p); toast(er.message, 1); }
+}
 const FL = [['pago_inscricao', 'Inscrição'], ['pago_transporte', 'Transporte']], DOC = [['autorizacao', 'Autorização'], ['ficha_medica', 'Ficha']];
 const valorK = (k, p) => (p.categoria === 'Desbravador' ? k.valor_dbv : k.valor_dir);
 const minhas = (ks, p) => ks.filter((k) => valorK(k, p) > 0);
@@ -152,28 +202,30 @@ V.pessoas = async (el) => {
   const F = { '': ['Todos', () => 1], deve: ['Por pagar', (p) => deve(p, ks) > 0], doc: ['Docs em falta', (p) => (!p.autorizacao && p.categoria === 'Desbravador') || !p.ficha_medica] };
   const l = ps.filter(F[filtro][1]); const nome = S.clubes.find((c) => c.id === S.clube)?.nome || '';
   const tag = (on, n, a) => `<button class="tag ${on ? 'ok' : 'no'}" ${a}>${on ? '✓' : '✗'} ${esc(n)}</button>`;
+  const linha = (p) => { const dv = deve(p, ks);
+    return `<div class="row" data-id="${p.id}" data-txt="${esc(norm(p.nome + ' ' + (p.encarregado || '') + ' ' + (p.telefone || '')))}"><div class="t"><b>${esc(p.nome)}</b><small>${p.categoria}${idade(p.nascimento) != null ? ' · ' + idade(p.nascimento) + ' anos' : ''}${p.encarregado ? ' · Enc. ' + esc(p.encarregado) : ''}${p.telefone ? ' · ' + esc(p.telefone) : ''}${dv ? ` · <span style="color:var(--red)">deve ${kz(dv)}</span>` : ' · <span style="color:var(--green)">tudo pago</span>'}</small>
+     <div>${tag(p.pago_inscricao, 'Inscrição', `data-k="pago_inscricao"`)}${tagT(p, `data-k="pago_transporte"`)}${minhas(ks, p).map((k) => tag(p.pagas.includes(k.id), k.nome, `data-c="${k.id}"`)).join('')}${DOC.map(([k, n]) => tag(p[k], n, `data-k="${k}"`)).join('')}</div></div></div>`; };
   el.innerHTML = `<div class="print-h"><b>Lista de acampantes</b> — ${esc(nome)}</div><h1>Acampantes</h1><p class="sub">${ps.length} inscritos · toque nas etiquetas para marcar</p>${ro()}
   ${papel() === 'director' ? `<div class="ro">🔒 Inscrições fechadas. Pode corrigir nomes e datas de nascimento; para incluir ou retirar alguém, faça um pedido à Missão.</div>` : ''}
   <div id="pd"></div>
+  <div class="tools"><input type="search" id="bp" placeholder="Procurar acampante, encarregado ou telefone…" value="${esc(buscaP)}" autocomplete="off"></div>
   <div class="chips">${Object.entries(F).map(([k, [n, f]]) => `<button data-f="${k}" class="${filtro === k ? 'on' : ''}">${n} (${ps.filter(f).length})</button>`).join('')}</div>
-  <div class="list">${l.map((p) => { const dv = deve(p, ks);
-    return `<div class="row" data-id="${p.id}"><div class="t"><b>${esc(p.nome)}</b><small>${p.categoria}${idade(p.nascimento) != null ? ' · ' + idade(p.nascimento) + ' anos' : ''}${p.encarregado ? ' · Enc. ' + esc(p.encarregado) : ''}${p.telefone ? ' · ' + esc(p.telefone) : ''}${dv ? ` · <span style="color:var(--red)">deve ${kz(dv)}</span>` : ' · <span style="color:var(--green)">tudo pago</span>'}</small>
-     <div>${FL.map(([k, n]) => tag(p[k], n, `data-k="${k}" data-p="${p.id}"`)).join('')}${minhas(ks, p).map((k) => tag(p.pagas.includes(k.id), k.nome, `data-c="${k.id}" data-p="${p.id}"`)).join('')}${DOC.map(([k, n]) => tag(p[k], n, `data-k="${k}" data-p="${p.id}"`)).join('')}</div></div></div>`; }).join('') || '<div class="empty">Ninguém aqui. Toque em + para adicionar.</div>'}</div>
+  <div class="list" id="lst">${l.map(linha).join('') || '<div class="empty">Ninguém aqui.</div>'}</div>
   <div class="acts noprint">${ed ? `<button class="btn gold" id="ct">💰 Contribuições do clube (${ks.length})</button>` : ''}${missao() ? `<button class="btn sec" id="il">${IC.csv} Importar lista</button>` : ''}${papel() === 'director' ? '<button class="btn sec" id="pi">➕ Pedir inclusão à Missão</button>' : ''}<button class="btn sec" onclick="print()">${IC.print} Imprimir</button><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button></div>`;
-  el.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { filtro = b.dataset.f; render(); }));
+  el.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { filtro = b.dataset.f; redesenhar(); }));
+  const lst = $('#lst', el); $('#bp', el).oninput = (e) => { buscaP = e.target.value; filtraLinhas(lst, buscaP); }; if (buscaP) filtraLinhas(lst, buscaP);
+  lst.onclick = (e) => { const r = e.target.closest('.row[data-id]'); if (!r) return; const p = ps.find((x) => x.id === +r.dataset.id), b = e.target.closest('[data-k],[data-c]');
+    if (b) return alterna(p, b, (q) => { const o = lst.querySelector(`.row[data-id="${q.id}"]`); if (o) o.outerHTML = linha(q); });
+    if (ed) mPessoa(p, ks); };
   $('#ex').onclick = () => baixar(`acampantes_${nome}.csv`, csv(['Nome', 'Categoria', 'Encarregado', 'Telefone', 'Inscrição', 'Transporte', ...ks.map((k) => k.nome), 'Autorização', 'Ficha médica', 'Deve (Kz)', 'Obs'],
-    ps.map((p) => [p.nome, p.categoria, p.encarregado, p.telefone, p.pago_inscricao ? 'Pago' : 'Não', p.pago_transporte ? 'Pago' : 'Não', ...ks.map((k) => (!valorK(k, p) ? '—' : p.pagas.includes(k.id) ? 'Pago' : 'Não')), p.autorizacao ? 'Sim' : 'Não', p.ficha_medica ? 'Sim' : 'Não', deve(p, ks), p.obs])));
+    ps.map((p) => [p.nome, p.categoria, p.encarregado, p.telefone, p.pago_inscricao ? 'Pago' : 'Não', ['Não', 'Recolhido', 'Reportado à Missão', 'Validado pela Missão'][estT(p)], ...ks.map((k) => (!valorK(k, p) ? '—' : p.pagas.includes(k.id) ? 'Pago' : 'Não')), p.autorizacao ? 'Sim' : 'Não', p.ficha_medica ? 'Sim' : 'Não', deve(p, ks), p.obs])));
   if ($('#ct')) $('#ct').onclick = mContrib;
   if ($('#il')) $('#il').onclick = mImportarLista;
-  const marcar = async (url, b) => { try { await api('PUT', url, b); render(); } catch (er) { toast(er.message, 1); } };
-  el.querySelectorAll('[data-k]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); if (!ed) return; const p = ps.find((x) => x.id === +b.dataset.p); marcar(`/c/${S.clube}/participantes/${p.id}`, { [b.dataset.k]: p[b.dataset.k] ? 0 : 1 }); }));
-  el.querySelectorAll('[data-c]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); if (!ed) return; const p = ps.find((x) => x.id === +b.dataset.p); marcar(`/c/${S.clube}/participantes/${p.id}/contrib/${b.dataset.c}`, { sim: p.pagas.includes(+b.dataset.c) ? 0 : 1 }); }));
   if ($('#pi')) $('#pi').onclick = () => mPedido({ tipo: 'incluir' });
   if (destaque) { const r = el.querySelector(`.row[data-id="${destaque}"]`); destaque = 0; if (r) { r.classList.add('destaque'); setTimeout(() => r.scrollIntoView({ block: 'center' }), 50); } }
   api('GET', `/c/${S.clube}/pedidos`).then((pd) => { const h = $('#pd'); if (!h || !pd.length) return; const E = { pendente: ['w', 'Pendente'], aceite: ['ok', 'Aceite'], recusado: ['no', 'Recusado'] };
     h.innerHTML = `<div class="card" style="margin-bottom:12px"><b>Pedidos à Missão</b>${pd.slice(0, 6).map((x) => `<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px;font-size:14px"><span>${x.tipo === 'incluir' ? '➕ Incluir' : '➖ Retirar'} <b>${esc(x.nome)}</b>${x.resposta ? `<br><small style="color:var(--mut)">${esc(x.resposta)}</small>` : ''}</span><span class="tag ${E[x.estado][0]}">${E[x.estado][1]}</span></div>`).join('')}</div>`; }).catch(() => {});
   if (!ed) return;
-  el.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => mPessoa(ps.find((x) => x.id === +r.dataset.id), ks)));
   if (missao()) fab(() => mPessoa({ categoria: 'Desbravador', pagas: [], itens: [] }, ks));
 };
 async function mPessoa(p, ks) {
@@ -185,7 +237,7 @@ async function mPessoa(p, ks) {
    <div><label>Data de nascimento</label><input name="nascimento" type="date" value="${esc(p.nascimento)}"></div></div>
    <label>Telefone ${p.categoria === 'Direção' ? '' : 'do encarregado'}</label><input name="telefone" inputmode="tel" value="${esc(p.telefone)}">
    <label>Nome do encarregado (pai/mãe)</label><input name="encarregado" value="${esc(p.encarregado)}" placeholder="Usado nas mensagens aos pais">
-   <label>Já pagou</label><div class="fl">${ck('pago_inscricao', 'Inscrição', p.pago_inscricao)}${ck('pago_transporte', 'Transporte', p.pago_transporte)}${ks.map((k) => ck('pagas', k.nome, p.pagas.includes(k.id), k.id)).join('')}</div>
+   <label>Já pagou</label><div class="fl">${ck('pago_inscricao', 'Inscrição', p.pago_inscricao)}${p.transp_remessa != null && !missao() ? `<label class="ck"><input type="checkbox" name="pago_transporte" checked disabled> Transporte (${ROT_T[estT(p)]})</label>` : ck('pago_transporte', 'Transporte' + (estT(p) > 1 ? ` (${ROT_T[estT(p)]})` : ''), p.pago_transporte)}${ks.map((k) => ck('pagas', k.nome, p.pagas.includes(k.id), k.id)).join('')}</div>
    <label>Documentos</label><div class="fl">${ck('autorizacao', 'Autorização dos pais', p.autorizacao)}${ck('ficha_medica', 'Ficha médica', p.ficha_medica)}</div>
    <label>Material que já tem</label><div class="fl">${its.map((i) => ck('itens', i.nome, p.itens.includes(i.id), i.id)).join('')}</div>
    <label>Observações (alergias, medicação…)</label><textarea name="obs">${esc(p.obs)}</textarea>
@@ -416,35 +468,115 @@ V.visao = async (el) => {
   if (papel() === 'director') return V.painel(el);
   const ls = await api('GET', '/visao'), ev = S.me.evento, M = papel() === 'missao';
   const nrm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), AF = ALERTAS.find((x) => x[0] === alertaF);
-  const f = ls.filter((c) => (!reg || c.regiao === reg) && (!AF || AF[2](c)) && (!busca || nrm(c.nome + ' ' + c.regiao + ' ' + (c.dir_nome || '')).includes(nrm(busca)))).sort((a, b) => b.alertas.length - a.alertas.length || a.nome.localeCompare(b.nome));
+  const f = ls.filter((c) => (!reg || c.regiao === reg) && (!AF || AF[2](c))).sort((a, b) => b.alertas.length - a.alertas.length || a.nome.localeCompare(b.nome));
   const s = (k) => f.reduce((a, c) => a + c[k], 0), npd = ls.reduce((a, c) => a + c.pedidos, 0);
-  el.innerHTML = `${npd ? `<div class="alert" style="cursor:pointer" id="vp">📨 <b>${npd} pedido(s)</b> de inclusão/retirada à espera de resposta. Toque para ver.</div>` : ''}<h1>Clubes</h1><p class="sub">${M ? 'Toda a Missão' : 'Região ' + esc(S.me.regiao?.nome)} · ${f.length} clubes · faltam ${dias(S.me.hoje, ev.inicio)} dias</p>
+  const nrm2 = ls.reduce((a, c) => a + (c.rem_pend || 0), 0);
+  el.innerHTML = `${npd ? `<div class="alert" style="cursor:pointer" id="vp">📨 <b>${npd} pedido(s)</b> de inclusão/retirada à espera de resposta. Toque para ver.</div>` : ''}${nrm2 ? `<div class="alert" style="cursor:pointer" id="vr">🚌 <b>${nrm2} reporte(s) de transporte</b> à espera de validação. Toque para ver.</div>` : ''}<h1>Clubes</h1><p class="sub">${M ? 'Toda a Missão' : 'Região ' + esc(S.me.regiao?.nome)} · ${f.length} clubes · faltam ${dias(S.me.hoje, ev.inicio)} dias</p>
   <div class="grid"><div class="card kpi"><small>Inscritos</small><b>${oficiais(f).of}</b><i>${s('n')} com nome na app${oficiais(f).sem ? ` · <b style="font-size:inherit;display:inline;color:var(--red)">${oficiais(f).sem} sem nome</b>` : ''}</i></div><div class="card kpi gold"><small>Pago</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))}</i></div>
    <div class="card kpi"><small>Checklist</small><b>${pct(s('feitas'), s('total'))}%</b></div><div class="card kpi red"><small>Clubes com alertas</small><b>${f.filter((c) => c.alertas.length).length}</b></div></div>
   <div class="tools" style="margin-top:12px"><input type="search" id="bu" placeholder="Procurar clube ou director…" value="${esc(busca)}">
    ${M ? `<select id="rg"><option value="">Todas as regiões</option>${[...new Set(ls.map((c) => c.regiao))].sort().map((r) => `<option ${r === reg ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}
    <select id="fa"><option value="">Todos os clubes</option>${ALERTAS.map(([k, t]) => `<option value="${k}" ${alertaF === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
-  <div class="list">${f.map((c) => `<div class="row" data-id="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} com nome${semNomeDe(c) ? ` · <b style="color:var(--red)">faltam ${semNomeDe(c)} nomes</b> (oficial ${c.inscritos_oficial})` : ''} <br>👤 ${c.ct_nome ? esc(c.ct_nome) : '<span style="color:var(--red)">sem nome do director</span>'}${c.ct_tel ? ' · ' + esc(c.ct_tel) : ' · <span style="color:var(--red)">sem telefone</span>'}${c.dir_id ? '' : ' · <span style="color:var(--mut)">sem acesso à app</span>'}</small>
+  <div class="list" id="lst">${f.map((c) => `<div class="row" data-id="${c.id}" data-txt="${esc(norm(c.nome + ' ' + c.regiao + ' ' + (c.ct_nome || '') + ' ' + (c.ct_tel || '')))}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} com nome${semNomeDe(c) ? ` · <b style="color:var(--red)">faltam ${semNomeDe(c)} nomes</b> (oficial ${c.inscritos_oficial})` : ''} <br>👤 ${c.ct_nome ? esc(c.ct_nome) : '<span style="color:var(--red)">sem nome do director</span>'}${c.ct_tel ? ' · ' + esc(c.ct_tel) : ' · <span style="color:var(--red)">sem telefone</span>'}${c.dir_id ? '' : ' · <span style="color:var(--mut)">sem acesso à app</span>'}</small>
     <div style="display:flex;gap:10px;margin-top:6px"><div style="flex:1"><small style="color:var(--mut)">Pago ${c.pct_pago}%</small><div class="bar ${c.pct_pago < 40 ? 'r' : c.pct_pago < 80 ? 'o' : ''}"><span style="width:${c.pct_pago}%"></span></div></div><div style="flex:1"><small style="color:var(--mut)">Checklist ${pct(c.feitas, c.total)}%</small><div class="bar ${pct(c.feitas, c.total) < 40 ? 'r' : 'o'}"><span style="width:${pct(c.feitas, c.total)}%"></span></div></div></div>
     <div>${c.pedidos ? `<span class="tag w">📨 ${c.pedidos} pedido(s)</span>` : ''}${c.alertas.map((a) => `<span class="tag no">${esc(a)}</span>`).join('')}</div></div>
-    <div class="v">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}${M ? `<br><button class="tag b" data-dir="${c.id}">Acesso</button>` : ''}</div></div>`).join('') || `<div class="empty">${reg || alertaF || busca ? 'Nenhum clube com estes filtros.' : 'Sem clubes.'}</div>`}</div>
-  <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button><button class="btn sec" id="pds">📨 Pedidos</button>${M ? '<button class="btn gold" id="im">Importar clubes</button><button class="btn gold" id="ia">Importar acampantes (todos os clubes)</button><button class="btn gold" id="ic">Importar contactos dos directores</button><button class="btn sec" id="rgs">Regionais</button><button class="btn sec" id="cdn">Coordenação</button>' : ''}</div>`;
-  $('#bu').oninput = (e) => { busca = e.target.value; clearTimeout(el._t); el._t = setTimeout(() => { render(); setTimeout(() => { const b = $('#bu'); if (b) { b.focus(); b.setSelectionRange(99, 99); } }); }, 350); };
-  if ($('#rg')) $('#rg').onchange = (e) => { reg = e.target.value; render(); };
-  $('#fa').onchange = (e) => { alertaF = e.target.value; render(); };
+    <div class="v">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}${M ? `<br><button class="tag b" data-dir="${c.id}">Acesso</button>` : ''}</div></div>`).join('') || `<div class="empty">${reg || alertaF ? 'Nenhum clube com estes filtros.' : 'Sem clubes.'}</div>`}</div>
+  <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button><button class="btn sec" id="pds">📨 Pedidos</button><button class="btn sec" id="rms">🚌 Transporte</button>${M ? '<button class="btn gold" id="im">Importar clubes</button><button class="btn gold" id="ia">Importar acampantes (todos os clubes)</button><button class="btn gold" id="ic">Importar contactos dos directores</button><button class="btn sec" id="rgs">Regionais</button><button class="btn sec" id="cdn">Coordenação</button>' : ''}</div>`;
+  $('#bu').oninput = (e) => { busca = e.target.value; filtraLinhas($('#lst'), busca); };
+  if (busca) filtraLinhas($('#lst'), busca);
+  if ($('#rg')) $('#rg').onchange = (e) => { reg = e.target.value; redesenhar(); };
+  $('#fa').onchange = (e) => { alertaF = e.target.value; redesenhar(); };
   $('#ex').onclick = () => baixar('clubes_campori.csv', csv(['Região', 'Clube', 'Director (contacto)', 'Telefone', 'Acampantes', 'Desbravadores', 'Direcção', 'Tudo pago', '% pago', 'Sem autorização', 'Sem ficha', '% material', 'Checklist', 'Alertas'], f.map((c) => [c.regiao, c.nome, c.ct_nome, c.ct_tel, c.n, c.dbv, c.dir, c.pagos, c.pct_pago, c.sem_aut, c.sem_ficha, c.pct_material, `${c.feitas}/${c.total}`, c.alertas.join(' | ')])));
   el.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = (e) => { if (e.target.closest('a,button')) return; S.clube = +r.dataset.id; st.set('cs_clube', S.clube); location.hash = '#/clube/painel'; }));
   el.querySelectorAll('[data-dir]').forEach((b) => (b.onclick = () => mAcesso(ls.find((c) => c.id === +b.dataset.dir))));
   if (M) { $('#im').onclick = mImportar; $('#rgs').onclick = mRegionais; $('#cdn').onclick = mCoordenacao; $('#ic').onclick = mImportarContactos; $('#ia').onclick = mImportarTodos; }
-  $('#pds').onclick = mPedidos; if ($('#vp')) $('#vp').onclick = mPedidos;
+  $('#pds').onclick = mPedidos; if ($('#vp')) $('#vp').onclick = mPedidos; $('#rms').onclick = mRemessas; if ($('#vr')) $('#vr').onclick = mRemessas;
   el.insertAdjacentHTML('beforeend', '<p class="sub noprint" style="text-align:center;margin-top:18px"><a href="#" id="cs">Trocar a minha senha</a></p>');
   $('#cs', el).onclick = (e) => { e.preventDefault(); mSenha(false); };
 };
 
 
+
+// ===================== PAGAMENTOS (filtro por contribuição + transporte em 3 etapas) =====================
+let pgF = { k: 'transporte', s: '' }, buscaPg = '';
+const resumoT = (ps) => { const t = S.me.evento.transporte, c = (e) => ps.filter((p) => estT(p) === e).length;
+  return { rec: c(1), rep: c(2), val: c(3), tot: ps.length, t }; };
+V.pagamentos = async (el) => {
+  if (!S.clube) return (el.innerHTML = '<div class="empty">Ainda não há clubes.</div>');
+  const [ps, ks, rs] = await Promise.all([api('GET', `/c/${S.clube}/participantes`), api('GET', `/c/${S.clube}/contribuicoes`), api('GET', `/c/${S.clube}/remessas`)]), ed = pode(), ev = S.me.evento;
+  const nomeC = S.clubes.find((c) => c.id === S.clube)?.nome || S.me.clube?.nome || '';
+  const CT = [['inscricao', 'Inscrição'], ['transporte', 'Transporte'], ...ks.map((k) => ['c' + k.id, k.nome])];
+  if (!CT.some((x) => x[0] === pgF.k)) pgF.k = 'transporte';
+  const K = pgF.k, kc = ks.find((k) => 'c' + k.id === K), nomeK = CT.find((x) => x[0] === K)[1];
+  const val = (p) => (K === 'inscricao' ? p.taxa : K === 'transporte' ? ev.transporte : valorK(kc, p));
+  const pagou = (p) => (K === 'inscricao' ? !!p.pago_inscricao : K === 'transporte' ? !!p.pago_transporte : p.pagas.includes(kc.id));
+  const SIT = { '': ['Todos', () => true], sim: [K === 'transporte' ? 'Pagou (recolhido)' : 'Pagou', pagou], nao: ['Não pagou', (p) => !pagou(p)],
+    ...(K === 'transporte' ? { rec: ['Por reportar', (p) => estT(p) === 1], rep: ['Reportado', (p) => estT(p) === 2], val: ['Validado pela Missão', (p) => estT(p) === 3] } : {}) };
+  if (!SIT[pgF.s]) pgF.s = '';
+  const base = ps.filter((p) => val(p) > 0), l = base.filter(SIT[pgF.s][1]), tot = (x) => x.reduce((a, p) => a + val(p), 0);
+  const T = resumoT(ps), dirOuMissao = ed;
+  const estado = (p) => (K === 'transporte' ? ['Por pagar', 'Recolhido', 'Reportado à Missão', 'Validado pela Missão'][estT(p)] : pagou(p) ? 'Pago' : 'Por pagar');
+  const botao = (p) => K === 'inscricao' ? `<button class="tag ${p.pago_inscricao ? 'ok' : 'no'}" data-k="pago_inscricao">${p.pago_inscricao ? '✓ Pago' : '✗ Por pagar'}</button>`
+    : K === 'transporte' ? tagT(p, 'data-k="pago_transporte"') : `<button class="tag ${pagou(p) ? 'ok' : 'no'}" data-c="${kc.id}">${pagou(p) ? '✓ Pago' : '✗ Por pagar'}</button>`;
+  const linha = (p) => `<div class="row" data-id="${p.id}" data-txt="${esc(norm(p.nome + ' ' + (p.encarregado || '')))}"><div class="t"><b>${esc(p.nome)}</b><small>${p.categoria} · ${kz(val(p))}</small></div><div class="v">${botao(p)}</div></div>`;
+  const ER = { pendente: ['w', 'À espera da Missão'], validada: ['ok', 'Validada'], recusada: ['no', 'Recusada'] };
+  el.innerHTML = `<h1>Pagamentos</h1><p class="sub">${esc(nomeC)} · toque na etiqueta para marcar quem pagou</p>
+  <div class="card"><b>🚌 Transporte (${kz(ev.transporte)} por pessoa)</b>
+   <div class="grid" style="margin-top:8px"><div class="card kpi"><small>Recolhido</small><b>${T.rec + T.rep + T.val}</b><i>${kz((T.rec + T.rep + T.val) * T.t)}</i></div>
+    <div class="card kpi gold"><small>Reportado, à espera</small><b>${T.rep}</b><i>${kz(T.rep * T.t)}</i></div>
+    <div class="card kpi green"><small>Validado pela Missão</small><b>${T.val}</b><i>${kz(T.val * T.t)}</i></div>
+    <div class="card kpi red"><small>Por reportar</small><b>${T.rec}</b><i>${kz(T.rec * T.t)}</i></div></div>
+   ${T.rec && dirOuMissao ? `<div class="acts" style="margin-top:8px"><button class="btn gold" id="rp">📤 Reportar à Missão: ${T.rec} pessoa(s) · ${kz(T.rec * T.t)}</button></div>` : ''}
+   ${rs.length ? `<div class="list" style="margin-top:8px">${rs.slice(0, 5).map((x) => `<div class="row" style="cursor:default"><div class="t"><b>${x.n} pessoa(s) · ${kz(x.valor)}</b><small>Reportado a ${dt(x.criado_em.slice(0, 10))}${x.estado === 'validada' ? ` · validadas ${x.n_validados}` : ''}${x.nota ? ' · ' + esc(x.nota) : ''}</small></div><span class="tag ${ER[x.estado][0]}">${ER[x.estado][1]}</span></div>`).join('')}</div>` : ''}
+   <p class="sub" style="margin:8px 0 0">Depois de reportar, a Missão pede o comprovativo pelo WhatsApp e valida. Só o que for validado conta como pago na Missão.</p></div>
+  <h2>Quem pagou o quê</h2>
+  <div class="tools"><select id="pk">${CT.map(([k, n]) => `<option value="${k}" ${k === K ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+   <input type="search" id="bpg" placeholder="Procurar nome…" value="${esc(buscaPg)}" autocomplete="off"></div>
+  <div class="chips">${Object.entries(SIT).map(([k, [n, f]]) => `<button data-s="${k}" class="${pgF.s === k ? 'on' : ''}">${n} (${base.filter(f).length})</button>`).join('')}</div>
+  <p class="sub"><b>${l.length}</b> pessoa(s) · <b>${kz(tot(l))}</b></p>
+  <div class="list" id="lpg">${l.map(linha).join('') || '<div class="empty">Ninguém nesta situação.</div>'}</div>
+  <div class="acts noprint"><button class="btn" id="pdf">${IC.print} Baixar PDF</button><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button></div>`;
+  const lst = $('#lpg', el);
+  $('#pk', el).onchange = (e) => { pgF = { k: e.target.value, s: '' }; redesenhar(); };
+  el.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => { pgF.s = b.dataset.s; redesenhar(); }));
+  $('#bpg', el).oninput = (e) => { buscaPg = e.target.value; filtraLinhas(lst, buscaPg); }; if (buscaPg) filtraLinhas(lst, buscaPg);
+  lst.onclick = (e) => { const b = e.target.closest('[data-k],[data-c]'), r = e.target.closest('.row[data-id]'); if (!b || !r) return;
+    alterna(ps.find((x) => x.id === +r.dataset.id), b, (q) => { const o = lst.querySelector(`.row[data-id="${q.id}"]`); if (o) o.outerHTML = linha(q); }); };
+  const filtroTxt = `${nomeK} · ${SIT[pgF.s][0]}`;
+  $('#pdf', el).onclick = () => janelaImpressao(`Pagamentos — ${filtroTxt}`, `<p><b>${l.length}</b> pessoa(s) · total <b>${kz(tot(l))}</b> · ${dt(S.me.hoje)}</p>
+    <table><tr><th>#</th><th>Nome</th><th>Categoria</th><th>Situação</th><th style="text-align:right">Valor</th></tr>${l.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.nome)}</td><td>${p.categoria}</td><td>${estado(p)}</td><td style="text-align:right">${kz(val(p))}</td></tr>`).join('')}
+    <tr><th colspan="4">Total</th><th style="text-align:right">${kz(tot(l))}</th></tr></table>
+    ${K === 'transporte' ? `<p style="margin-top:14px">Transporte: recolhido ${T.rec + T.rep + T.val} (${kz((T.rec + T.rep + T.val) * T.t)}) · reportado à espera ${T.rep} (${kz(T.rep * T.t)}) · validado pela Missão ${T.val} (${kz(T.val * T.t)})</p>` : ''}`,
+    'table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #bbb;padding:5px 7px;text-align:left}th{background:#eee}');
+  $('#ex', el).onclick = () => baixar(`pagamentos_${nomeK}_${nomeC}.csv`, csv(['Nome', 'Categoria', 'Contribuição', 'Situação', 'Valor (Kz)'], l.map((p) => [p.nome, p.categoria, nomeK, estado(p), val(p)])));
+  if ($('#rp', el)) $('#rp', el).onclick = async () => {
+    if (!confirm(`Reportar à Missão o transporte de ${T.rec} pessoa(s), ${kz(T.rec * T.t)}?\n\nDepois de reportado, só a Missão pode alterar estes pagamentos.`)) return;
+    try { const r = await api('POST', `/c/${S.clube}/remessas`); toast(`Reportado: ${r.n} pessoa(s) · ${kz(r.valor)}. A Missão vai pedir o comprovativo.`); refrescar(true); } catch (er) { toast(er.message, 1); } };
+};
+// Missão: validar o transporte reportado pelos clubes
+async function mRemessas() {
+  const rs = await api('GET', '/remessas'), M = missao(), pend = rs.filter((x) => x.estado === 'pendente'), feitas = rs.filter((x) => x.estado !== 'pendente');
+  const ER = { validada: ['ok', 'Validada'], recusada: ['no', 'Recusada'] };
+  modal(`<h3>Transporte reportado pelos clubes</h3><p class="sub">Peça o comprovativo pelo WhatsApp e valide. Desmarque quem não estiver no comprovativo: essas pessoas voltam para o clube como "recolhido".</p>
+   ${pend.map((x) => `<div class="card" style="margin-top:10px" data-r="${x.id}"><b>${esc(x.clube)}</b><br><small class="sub">${esc(x.regiao)} · reportado a ${dt(x.criado_em.slice(0, 10))} por ${esc(x.criado_por || '')}</small>
+     <p style="margin:6px 0"><b>${x.n} pessoa(s) · ${kz(x.valor)}</b></p>
+     <details><summary>Ver nomes</summary>${x.pessoas.map((p) => `<label class="ck"><input type="checkbox" value="${p.id}" checked ${M ? '' : 'disabled'}> ${esc(p.nome)} <small>(${p.categoria})</small></label>`).join('')}</details>
+     <div class="acts">${x.dir_tel ? `<a class="btn green sm" target="_blank" rel="noopener" href="${wa(x.dir_tel, `Maranata${x.dir_nome ? ', ' + x.dir_nome.split(' ')[0] : ''}! Recebemos na app o reporte do transporte do clube ${x.clube}: ${x.n} pessoa(s), ${kz(x.valor)}. Por favor envie-nos o comprovativo do pagamento.`)}">${IC.wa} Pedir comprovativo</a>` : '<span class="sub">Sem contacto do director</span>'}
+      ${M ? `<button class="btn red sm" data-rec="${x.id}">Recusar</button><button class="btn sm" data-val="${x.id}">Validar</button>` : ''}</div></div>`).join('') || '<div class="alert ok">✅ Nada à espera de validação.</div>'}
+   ${feitas.length ? `<h3 style="margin-top:16px">Tratadas nos últimos 30 dias</h3><div class="list">${feitas.map((x) => `<div class="row" style="cursor:default"><div class="t"><b>${esc(x.clube)}</b><small>${x.estado === 'validada' ? `${x.n_validados} de ${x.n} validadas` : `${x.n} pessoa(s)`} · ${dt(x.validado_em.slice(0, 10))} · ${esc(x.validado_por || '')}${x.nota ? ' · ' + esc(x.nota) : ''}</small></div><span class="tag ${ER[x.estado][0]}">${ER[x.estado][1]}</span></div>`).join('')}</div>` : ''}
+   <div class="acts"><button class="btn sec" onclick="fechar()">Fechar</button></div>`, (m) => {
+    m.querySelectorAll('[data-val]').forEach((b) => (b.onclick = async () => { const c = m.querySelector(`[data-r="${b.dataset.val}"]`), fora = [...c.querySelectorAll('input[type=checkbox]:not(:checked)')].map((x) => +x.value);
+      const x = pend.find((y) => y.id === +b.dataset.val), n = x.n - fora.length;
+      if (!confirm(`Validar ${n} de ${x.n} pessoa(s) do clube ${x.clube} (${kz(n * S.me.evento.transporte)})?`)) return;
+      try { const r = await api('PUT', '/remessas/' + x.id, { acao: 'validar', excluir: fora }); toast(`Validado: ${r.validados} pessoa(s) · ${kz(r.valor)}`); mRemessas(); renderTudo(); } catch (er) { toast(er.message, 1); } }));
+    m.querySelectorAll('[data-rec]').forEach((b) => (b.onclick = async () => { const nota = prompt('Motivo da recusa (o director vai ver):'); if (nota === null) return;
+      try { await api('PUT', '/remessas/' + b.dataset.rec, { acao: 'recusar', nota }); toast('Recusado'); mRemessas(); renderTudo(); } catch (er) { toast(er.message, 1); } }));
+  });
+}
+
 // ===================== MAIS (director) =====================
 V.mais = async (el) => {
-  const L = [['material', 'Material', 'Quem tem o quê'], ['tarefas', 'Checklist', 'Preparação do clube'], ['avisos', 'Avisos', 'Da Missão e da Região'], ['documentos', 'Documentos', 'Regulamento e outros']];
+  const L = [['pagamentos', 'Pagamentos', 'Quem pagou o quê · transporte'], ['material', 'Material', 'Quem tem o quê'], ['tarefas', 'Checklist', 'Preparação do clube'], ['avisos', 'Avisos', 'Da Missão e da Região'], ['documentos', 'Documentos', 'Regulamento e outros']];
   el.innerHTML = `<h1>Mais</h1><div class="mais">${L.map(([k, n, d]) => `<a href="#/${k}">${IC[k]}${n}<br><small style="color:var(--mut);font-weight:400">${d}</small></a>`).join('')}
    <a href="#" id="cs">${IC.sair}Trocar senha<br><small style="color:var(--mut);font-weight:400">${esc(S.me.user.login)}</small></a></div>`;
   $('#cs').onclick = (e) => { e.preventDefault(); mSenha(false); };
@@ -644,7 +776,8 @@ let secF = { estado: 'abertos', tipo: '', reg: '', q: '' }, verTodasSug = false;
 V.secretaria = async (el) => {
   const d = await api('GET', '/secretaria'), M = missao(), F = secF;
   const nrm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  const ok = (x) => (!F.tipo || x.tipo === F.tipo) && (!F.reg || x.regiao === F.reg) && (!F.q || nrm(x.titulo + ' ' + x.clube + ' ' + (x.responsavel || '')).includes(nrm(F.q)));
+  const ok = (x) => (!F.tipo || x.tipo === F.tipo) && (!F.reg || x.regiao === F.reg);
+  const txt = (x) => esc(norm(x.titulo + ' ' + (x.clube || '') + ' ' + (x.regiao || '') + ' ' + (x.responsavel || '') + ' ' + (x.dir_nome || '')));
   const ab = d.casos.filter((k) => k.estado !== 'Resolvido'), sug = d.sugestoes.filter(ok);
   const cs = d.casos.filter((k) => (F.estado === 'abertos' ? k.estado !== 'Resolvido' : F.estado === 'resolvidos' ? k.estado === 'Resolvido' : true) && ok(k));
   const regs = [...new Set(S.clubes.map((c) => c.regiao))].sort(), cor = { Aberto: 'no', 'Em curso': 'w', Resolvido: 'ok' };
@@ -658,20 +791,23 @@ V.secretaria = async (el) => {
    ${M ? `<select id="sr"><option value="">Todas as regiões</option>${regs.map((r) => `<option ${F.reg === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}
    <select id="st"><option value="">Todos os assuntos</option>${Object.entries(TIPOS).map(([k, n]) => `<option value="${k}" ${F.tipo === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
   <h2>Por analisar <small style="color:var(--mut);font-weight:400">(${sug.length})</small></h2>
-  <div class="list">${(verTodasSug ? sug : sug.slice(0, 15)).map((x, i) => `<div class="row" style="cursor:default"><div class="t"><b>${esc(x.titulo)}</b><small>${esc(x.clube)} · ${esc(x.regiao)}</small>
+  <div class="list" id="lsg">${sug.map((x, i) => `<div class="row" style="cursor:default" data-i="${i}" data-txt="${txt(x)}"><div class="t"><b>${esc(x.titulo)}</b><small>${esc(x.clube)} · ${esc(x.regiao)}</small>
     <div><span class="tag b">${TIPOS[x.tipo]}</span>${x.prioridade === 'Alta' ? '<span class="tag no">Alta</span>' : ''}</div></div>
     <div class="v">${M ? `<button class="btn sm" data-sg="${d.sugestoes.indexOf(x)}">Abrir caso</button>` : ''}${x.dir_tel ? `<br><a class="tag ok" target="_blank" rel="noopener" href="${wa(x.dir_tel, `Maranata, ${x.dir_nome.split(' ')[0]}! Sobre o clube ${x.clube} (Campori): ${x.titulo}.`)}">WhatsApp</a>` : ''}</div></div>`).join('') || '<div class="alert ok">✅ Nada por analisar.</div>'}</div>
   ${sug.length > 15 ? `<div class="acts"><button class="btn sec" id="vt">${verTodasSug ? 'Mostrar menos' : `Ver todos (${sug.length})`}</button></div>` : ''}
   <h2>Casos</h2><div class="chips">${[['abertos', 'Em aberto'], ['resolvidos', 'Resolvidos'], ['todos', 'Todos']].map(([k, n]) => `<button data-e="${k}" class="${F.estado === k ? 'on' : ''}">${n}</button>`).join('')}</div>
-  <div class="list">${cs.map((k) => `<div class="row" data-k="${k.id}"><div class="t"><b>${esc(k.titulo)}</b><small>${esc(k.clube || 'Geral')}${k.regiao ? ' · ' + esc(k.regiao) : ''}${k.responsavel ? ' · 👤 ' + esc(k.responsavel) : ''} · ${dt(k.atualizado_em.slice(0, 10))}${k.notas ? ' · 📝 ' + k.notas : ''}</small>
+  <div class="list" id="lcs">${cs.map((k) => `<div class="row" data-k="${k.id}" data-txt="${txt(k)}"><div class="t"><b>${esc(k.titulo)}</b><small>${esc(k.clube || 'Geral')}${k.regiao ? ' · ' + esc(k.regiao) : ''}${k.responsavel ? ' · 👤 ' + esc(k.responsavel) : ''} · ${dt(k.atualizado_em.slice(0, 10))}${k.notas ? ' · 📝 ' + k.notas : ''}</small>
     <div><span class="tag ${cor[k.estado]}">${k.estado}</span><span class="tag b">${TIPOS[k.tipo] || k.tipo}</span>${k.prioridade === 'Alta' ? '<span class="tag no">Alta</span>' : ''}</div></div></div>`).join('') || '<div class="empty">Sem casos neste filtro.</div>'}</div>
   <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button>${M ? `<button class="btn gold" id="io">Importar inscritos oficiais</button>` : ''}</div>`;
   const re = () => render();
-  $('#sq').oninput = (e) => { F.q = e.target.value; clearTimeout(el._t); el._t = setTimeout(() => { re(); setTimeout(() => { const b = $('#sq'); if (b) { b.focus(); b.setSelectionRange(99, 99); } }); }, 350); };
-  if ($('#sr')) $('#sr').onchange = (e) => { F.reg = e.target.value; re(); };
-  $('#st').onchange = (e) => { F.tipo = e.target.value; re(); };
-  el.querySelectorAll('[data-e]').forEach((b) => (b.onclick = () => { F.estado = b.dataset.e; re(); }));
-  if ($('#vt')) $('#vt').onclick = () => { verTodasSug = !verTodasSug; re(); };
+  // busca no próprio telemóvel: só esconde/mostra linhas (as sugestões mostram 15 até se procurar ou tocar em "Ver todos")
+  const aplica = () => { filtraLinhas($('#lsg'), F.q, (r, q) => q || verTodasSug || +r.dataset.i < 15); filtraLinhas($('#lcs'), F.q); };
+  aplica();
+  $('#sq').oninput = (e) => { F.q = e.target.value; aplica(); };
+  if ($('#sr')) $('#sr').onchange = (e) => { F.reg = e.target.value; redesenhar(); };
+  $('#st').onchange = (e) => { F.tipo = e.target.value; redesenhar(); };
+  el.querySelectorAll('[data-e]').forEach((b) => (b.onclick = () => { F.estado = b.dataset.e; redesenhar(); }));
+  if ($('#vt')) $('#vt').onclick = () => { verTodasSug = !verTodasSug; $('#vt').textContent = verTodasSug ? 'Mostrar menos' : `Ver todos (${sug.length})`; aplica(); };
   el.querySelectorAll('[data-sg]').forEach((b) => (b.onclick = () => mNovoCaso(d.sugestoes[+b.dataset.sg])));
   el.querySelectorAll('[data-k]').forEach((r) => (r.onclick = () => mCaso(+r.dataset.k)));
   $('#ex').onclick = () => baixar('secretaria_casos.csv', csv(['Assunto', 'Tipo', 'Clube', 'Região', 'Estado', 'Prioridade', 'Responsável', 'Criado', 'Actualizado'], d.casos.map((k) => [k.titulo, TIPOS[k.tipo] || k.tipo, k.clube, k.regiao, k.estado, k.prioridade, k.responsavel, k.criado_em, k.atualizado_em])));
@@ -732,22 +868,24 @@ function mProcurar() {
     const abrir = (cid, sub, pid) => { S.clube = cid; st.set('cs_clube', cid); destaque = pid || 0; fechar(); filtro = ''; location.hash = '#/clube/' + sub; if (rota() === 'clube') render(); };
     const procurar = async () => {
       const q = $('#q', m).value.trim(), meu = ++pedido; if (q.length < 2) { $('#rq', m).innerHTML = '<p class="sub">Escreva pelo menos 2 letras.</p>'; return; }
-      const cs = S.clubes.filter((c) => nrm(c.nome + ' ' + c.igreja + ' ' + c.regiao).includes(nrm(q))).slice(0, 8);
-      const ps = await api('GET', '/procurar?q=' + encodeURIComponent(q)).catch(() => []); if (meu !== pedido) return;
-      $('#rq', m).innerHTML = (cs.length ? `<div class="fase">Clubes</div><div class="list">${cs.map((c) => `<div class="row" data-c="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}</small></div></div>`).join('')}</div>` : '')
+      const cs = S.clubes.filter((c) => nrm(c.nome + ' ' + c.igreja + ' ' + c.regiao + ' ' + (c.contacto_nome || '')).includes(nrm(q))).slice(0, 8);
+      const pinta = (ps, aCarregar) => { $('#rq', m).innerHTML = (cs.length ? `<div class="fase">Clubes</div><div class="list">${cs.map((c) => `<div class="row" data-c="${c.id}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}</small></div></div>`).join('')}</div>` : '')
         + (ps.length ? `<div class="fase">Pessoas</div><div class="list">${ps.map((p) => `<div class="row" data-p="${p.id}" data-pc="${p.clube_id}"><div class="t"><b>${esc(p.nome)}</b><small>${p.categoria} · ${esc(p.clube)} · ${esc(p.regiao)}</small></div></div>`).join('')}</div>` : '')
-        + (!cs.length && !ps.length ? '<p class="sub">Nada encontrado.</p>' : '');
+        + (aCarregar ? '<p class="sub">A procurar pessoas…</p>' : !cs.length && !ps.length ? '<p class="sub">Nada encontrado.</p>' : '');
       $('#rq', m).querySelectorAll('[data-c]').forEach((r) => (r.onclick = () => abrir(+r.dataset.c, 'painel')));
-      $('#rq', m).querySelectorAll('[data-p]').forEach((r) => (r.onclick = () => abrir(+r.dataset.pc, 'pessoas', +r.dataset.p)));
+      $('#rq', m).querySelectorAll('[data-p]').forEach((r) => (r.onclick = () => abrir(+r.dataset.pc, 'pessoas', +r.dataset.p))); };
+      pinta([], true);
+      const ps = await api('GET', '/procurar?q=' + encodeURIComponent(q)).catch(() => []); if (meu !== pedido) return;
+      pinta(ps, false);
     };
-    $('#q', m).oninput = () => { clearTimeout(t); t = setTimeout(procurar, 250); }; procurar(); $('#q', m).focus();
+    $('#q', m).oninput = () => { clearTimeout(t); t = setTimeout(procurar, 200); }; procurar(); $('#q', m).focus();
   });
 }
 // página de um clube, aberta a partir da lista
 V.clube = async (el) => {
   const sub = location.hash.split('/')[2] || 'painel', c = S.clubes.find((x) => x.id === S.clube);
   if (!c) { location.hash = '#/visao'; return; }
-  const T = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ...(missao() ? [['fichas', 'Fichas']] : []), ['material', 'Material'], ['tarefas', 'Checklist']];
+  const T = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ['pagamentos', 'Pagamentos'], ...(missao() ? [['fichas', 'Fichas']] : []), ['material', 'Material'], ['tarefas', 'Checklist']];
   el.innerHTML = `<p class="sub noprint" style="margin:0 0 6px"><a href="#/visao">← Clubes</a></p><h1>${esc(c.nome)}</h1><p class="sub">${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}${pode() ? '' : ' · só leitura'}</p>
    <div class="clubebar noprint"><span>👤 <b>${esc(c.contacto_nome || 'Sem contacto do director')}</b>${c.contacto_tel ? ' · ' + esc(c.contacto_tel) : ''}</span><span>${botoesContacto(c.contacto_nome, c.contacto_tel, c.nome)} <button class="tag" id="ec">Editar</button></span></div>
    <div class="chips noprint">${T.map(([k, n]) => `<button data-s="${k}" class="${sub === k ? 'on' : ''}">${n}</button>`).join('')}</div><div id="sv"></div>`;
@@ -770,6 +908,7 @@ V.geral = async (el) => {
   const top = [...ls].sort((a, b) => b.n - a.n).slice(0, 5);
   el.innerHTML = `<div class="print-h"><b>${esc(ev.nome)}</b> — Painel geral — ${dt(h)}</div>
   ${npd ? `<div class="alert" style="cursor:pointer" id="vp">📨 <b>${npd} pedido(s)</b> de inclusão/retirada à espera de resposta.</div>` : ''}
+  ${s('rem_pend') ? `<div class="alert" style="cursor:pointer" id="vr">🚌 <b>${s('rem_pend')} reporte(s) de transporte</b> à espera de validação.</div>` : ''}
   <h1>${M ? 'Missão Sul de Luanda e Cabinda' : 'Região ' + esc(S.me.regiao?.nome || '')}</h1><p class="sub">${esc(ev.nome)}</p>
   <div class="card hero"><small>${f >= 0 ? 'Dias até à partida' : 'Campori a decorrer'}</small><div class="big">${Math.max(0, f)}</div><small>${esc(ev.local)} · ${dt(ev.inicio)} a ${dt(ev.fim)}</small>
    <div class="marcos">${[['Cobrança nos clubes', ev.prazo_cobranca], ['Pagamento do transporte', ev.prazo_transporte], ['Partida', ev.inicio]].map(([t, x]) => { const k = dias(h, x); return `<div class="marco ${k < 0 ? 'feito' : k <= 7 ? 'perto' : ''}"><b>${dt(x)}</b>${t}</div>`; }).join('')}</div></div>
@@ -777,7 +916,9 @@ V.geral = async (el) => {
    <div class="card kpi"><small>Inscritos (oficial)</small><b>${oficiais(ls).of.toLocaleString('pt-PT')}</b><i>${n} com nome na app (${dbv} dbv · ${dir} direcção)${oficiais(ls).sem ? ` · <span style="color:var(--red)">${oficiais(ls).sem} sem nome</span>` : ''}</i></div>
    <div class="card kpi"><small>Clubes</small><b>${ls.length}</b><i>${ls.filter((c) => c.dir_id).length} com director na app</i></div>
    <div class="card kpi ${pct(s('recebido'), s('devido')) >= 80 ? 'green' : 'gold'}"><small>Pagamentos</small><b>${pct(s('recebido'), s('devido'))}%</b><i>${kz(s('recebido'))} de ${kz(s('devido'))}</i></div>
-   <div class="card kpi"><small>Com tudo pago</small><b>${s('pagos')}</b><i>de ${n} acampantes</i></div>
+   <div class="card kpi"><small>Com tudo pago</small><b>${s('pagos')}</b><i>de ${n} acampantes (validado)</i></div>
+   <div class="card kpi green" id="kt" style="cursor:pointer"><small>Transporte validado</small><b>${s('transp_val')}</b><i>${kz(s('transp_val') * ev.transporte)} · ${s('transp_rep')} à espera de validação</i></div>
+   <div class="card kpi"><small>Transporte recolhido nos clubes</small><b>${s('transp_rec')}</b><i>${kz(s('transp_rec') * ev.transporte)}, segundo os directores</i></div>
   </div>
   <div class="card" style="margin-top:12px">${barra('Pagamentos', pct(s('recebido'), s('devido')))}${barra('Autorizações dos pais', pct(dbv - s('sem_aut'), dbv))}${barra('Fichas médicas', pct(n - s('sem_ficha'), n))}${barra('Fichas individuais completas', pct(s('fichas'), n))}${barra('Material individual (média)', ls.length ? Math.round(s('pct_material') / ls.length) : 0)}${barra('Checklist dos clubes', pct(s('feitas'), s('total')))}${barra('Clubes com director na app', pct(ls.filter((c) => c.dir_id).length, ls.length))}</div>
   <h2>Pontos de atenção</h2>
@@ -793,7 +934,7 @@ V.geral = async (el) => {
   el.querySelectorAll('[data-a]').forEach((r) => (r.onclick = () => verClubes('', r.dataset.a)));
   el.querySelectorAll('[data-r]').forEach((r) => (r.onclick = () => verClubes(r.dataset.r, '')));
   el.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => { S.clube = +r.dataset.id; st.set('cs_clube', S.clube); location.hash = '#/clube/painel'; }));
-  if ($('#vp')) $('#vp').onclick = mPedidos;
+  if ($('#vp')) $('#vp').onclick = mPedidos; if ($('#vr')) $('#vr').onclick = mRemessas; $('#kt').onclick = mRemessas;
 };
 async function mPedidos() {
   const ps = await api('GET', '/pedidos'), M = missao();
