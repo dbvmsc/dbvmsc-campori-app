@@ -215,3 +215,4 @@ a.btn{text-decoration:none}
 @media (max-width:360px){.acao span{display:none}}
 .acao.largo{flex-basis:100%}
 .acao span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(min-width:1000px){#bia{display:none}.side a.ia{color:var(--orange,#E07B00);font-weight:600}}

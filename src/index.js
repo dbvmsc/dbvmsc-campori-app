@@ -1,5 +1,5 @@
 // Campori — versão simples (Cloudflare Worker + D1)
-const VERSAO = '5.0.1';
+const VERSAO = '5.0.2';
 
 const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const hoje = () => new Date(Date.now() + 3600e3).toISOString().slice(0, 10); // hora de Angola
@@ -256,15 +256,20 @@ DADOS DA APP (actualizados agora, ${hoje()}):
 ${ctx}`;
     const msgs = [{ role: 'system', content: sys }, ...hist, { role: 'user', content: q }];
     if (env.IA_TESTE && !env.AI) return json({ resposta: 'Resposta de teste para: ' + q, restam: lim - uso - 1, contexto: ctx }); // só em testes locais
-    let txt = '', ult = null;
-    for (const mod of ['@cf/google/gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash']) {
+    // Gemma 4 sem "pensar" (rápido); se falhar, Llama 3.3 70B (não pensa, bom em português)
+    const MODS = [['@cf/google/gemma-4-26b-a4b-it', { messages: msgs, max_completion_tokens: 900, temperature: 0.2, chat_template_kwargs: { enable_thinking: false } }],
+      ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', { messages: msgs, max_tokens: 900, temperature: 0.2 }]];
+    let txt = '', ult = '';
+    for (const [mod, inp] of MODS) {
       try {
-        const r = await env.AI.run(mod, { messages: msgs, max_tokens: 700, temperature: 0.2 });
-        txt = (r?.response ?? r?.choices?.[0]?.message?.content ?? '').toString().trim();
+        const r = await env.AI.run(mod, inp);
+        const c = r?.choices?.[0]?.message?.content ?? r?.response ?? r?.result?.response ?? '';
+        txt = (typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x.text || '').join('') : String(c || '')).trim();
         if (txt) break;
-      } catch (e) { ult = e; if (/neuron|quota|limit|429|4006/i.test(String(e.message))) break; }
+        ult = mod.split('/').pop() + ': resposta vazia (' + (r?.choices?.[0]?.finish_reason || 'sem texto') + ')';
+      } catch (e) { ult = mod.split('/').pop() + ': ' + String(e.message || e).slice(0, 160); if (/neuron|quota|daily|4006/i.test(ult)) break; }
     }
-    if (!txt) throw new E(/neuron|quota|limit|429|4006/i.test(String(ult?.message)) ? 'A quota diária gratuita da IA esgotou. Tente amanhã.' : 'O assistente não respondeu. Tente de novo daqui a pouco.', 503);
+    if (!txt) throw new E(/neuron|quota|daily|4006/i.test(ult) ? 'A quota diária gratuita da IA esgotou. Tente amanhã.' : 'O assistente não respondeu. Tente de novo.' + (missao ? ' (Detalhe técnico: ' + ult + ')' : ''), 503);
     txt = txt.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     await DB.prepare('INSERT INTO ia_uso (user_id,dia,n) VALUES (?,?,1) ON CONFLICT(user_id,dia) DO UPDATE SET n=n+1').bind(u.id, hoje()).run();
     return json({ resposta: txt, restam: lim - uso - 1 });

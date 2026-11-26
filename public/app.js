@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '5.0.1';
+const VERSAO = '5.0.2';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -140,11 +140,11 @@ function render() {
   $('#app').innerHTML = `${navigator.onLine ? '' : '<div class="off">Sem internet</div>'}
   <header class="top"><img class="logo" src="/logo.png" alt=""><div class="tt"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
    ${coord() ? `<button class="ib" id="lp" title="Procurar">${IC.lupa}</button>` : `<button class="ib" id="sn" title="Avisos">${IC.sino}${S.naoLidos ? `<span class="dot">${S.naoLidos}</span>` : ''}</button>`}<button class="ib ia" id="bia" title="Assistente">${IC.ia}</button><button class="ib" id="bt" title="Tema">${escuro ? IC.sol : IC.lua}</button><button class="sair" id="bs">${IC.sair}<span>Sair</span></button></header>
-  <div class="wrap"><nav class="side">${[...abas()].sort((a, b) => (b[0] === 'painel') - (a[0] === 'painel')).map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
+  <div class="wrap"><nav class="side">${[...abas()].sort((a, b) => (b[0] === 'painel') - (a[0] === 'painel')).map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<a href="#" id="bia2" class="ia">${IC.ia}Assistente IA</a><div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
   <nav class="nav">${abas().map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}${k === 'painel' ? ' centro' : ''}">${k === 'painel' ? `<span class="bola">${IC[k]}</span>` : IC[k]}${n}</a>`).join('')}</nav>`;
   $('#bs').onclick = () => sair();
   if ($('#lp')) $('#lp').onclick = mProcurar;
-  $('#bia').onclick = mAssistente;
+  $('#bia').onclick = mAssistente; $('#bia2').onclick = (e) => { e.preventDefault(); mAssistente(); };
   if ($('#sn')) $('#sn').onclick = () => (location.hash = '#/avisos');
   $('#bt').onclick = () => { st.set('cs_tema', escuro ? 'claro' : 'escuro'); tema(); renderTudo(); };
   const main = $('#main');
