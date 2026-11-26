@@ -192,3 +192,26 @@ a.btn{text-decoration:none}
 .selbar{position:sticky;top:64px;z-index:5;display:flex;gap:8px;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:8px 10px;margin:8px 0}
 .row .sel{width:22px;height:22px;flex:none}
 [hidden]{display:none!important}
+
+.chat{max-height:52vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin:10px 0;padding:4px}
+.msg{padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;max-width:88%;word-wrap:break-word}
+.msg.eu{align-self:flex-end;background:var(--navy,#0B2545);color:#fff;border-bottom-right-radius:4px}
+.msg.ia{align-self:flex-start;background:var(--card2,#EEF1F6);color:inherit;border-bottom-left-radius:4px}
+[data-tema=escuro] .msg.ia{background:#1E2A3C}
+.msg.pensa{opacity:.6;font-style:italic}
+.chatf{display:flex;gap:8px}.chatf input{flex:1}
+.ib.ia{color:var(--gold,#E0A800)}
+
+/* botões de acção (WhatsApp, Ligar, Gerir): grandes, com ícone e espaçados */
+.row.clube{flex-wrap:wrap}
+.acoes{flex-basis:100%;display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.acao{flex:1 1 0;min-width:0;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 6px;border-radius:12px;border:0;font:inherit;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;background:var(--chip);color:var(--ink,inherit)}
+.acao svg{width:18px;height:18px;flex:none}
+.acao.wa{background:#E3F4EA;color:#14603A}
+.acao.ligar{background:#E5EEFA;color:#123B66}
+.acao.gerir{background:var(--chip)}
+[data-tema=escuro] .acao.wa{background:#163B27;color:#8FE0B0}
+[data-tema=escuro] .acao.ligar{background:#16304F;color:#9CC3F0}
+@media (max-width:360px){.acao span{display:none}}
+.acao.largo{flex-basis:100%}
+.acao span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

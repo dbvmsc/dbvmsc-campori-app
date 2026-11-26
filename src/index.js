@@ -1,5 +1,5 @@
 // Campori — versão simples (Cloudflare Worker + D1)
-const VERSAO = '4.9.1';
+const VERSAO = '5.0.1';
 
 const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const hoje = () => new Date(Date.now() + 3600e3).toISOString().slice(0, 10); // hora de Angola
@@ -127,16 +127,72 @@ async function criarConta(DB, b) {
   return { login: email || t, senha };
 }
 
+// ===== contexto do assistente IA (respeita o âmbito: director → clube; regional → região; Missão → tudo) =====
+const nrmIA = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const kzIA = (n) => String(Math.round(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' Kz';
+async function detalheClubeIA(DB, c, ev) {
+  const ps = (await DB.prepare('SELECT id, nome, categoria, nascimento, pago_inscricao, pago_transporte, transp_remessa, transp_validado, autorizacao, ficha_medica FROM participantes WHERE clube_id=? ORDER BY categoria, nome').bind(c.id).all()).results;
+  const ks = (await DB.prepare('SELECT * FROM contribuicoes WHERE clube_id=?').bind(c.id).all()).results;
+  const pg = (await DB.prepare('SELECT x.participante_id, x.contribuicao_id FROM contrib_pagas x JOIN participantes p ON p.id=x.participante_id WHERE p.clube_id=?').bind(c.id).all()).results;
+  const pagas = {}; for (const x of pg) (pagas[x.participante_id] ||= new Set()).add(x.contribuicao_id);
+  const it = (await DB.prepare('SELECT i.nome, COUNT(t.participante_id) n FROM itens i LEFT JOIN itens_tem t ON t.item_id=i.id WHERE i.clube_id=? GROUP BY i.id').bind(c.id).all()).results;
+  const tr = (p) => (!p.pago_transporte ? 'por pagar' : p.transp_validado ? 'validado pela Missão' : p.transp_remessa != null ? 'reportado à Missão' : 'recolhido pelo director');
+  const id = (n) => (n ? Math.floor((Date.parse(ev.inicio) - Date.parse(n)) / 31557600000) : '?');
+  let o = `\nACAMPANTES DO CLUBE ${c.nome} (${ps.length}): nome | categoria | idade | inscrição | transporte | ${ks.map((k) => k.nome).join(' | ')}${ks.length ? ' | ' : ''}autorização | ficha médica entregue\n`;
+  o += ps.map((p) => [p.nome, p.categoria, id(p.nascimento), p.pago_inscricao ? 'paga' : 'por pagar', tr(p), ...ks.map((k) => (pagas[p.id]?.has(k.id) ? 'pago' : 'por pagar')), p.autorizacao ? 'sim' : 'não', p.ficha_medica ? 'sim' : 'não'].join(' | ')).join('\n');
+  if (ks.length) o += `\nCONTRIBUIÇÕES DO CLUBE: ${ks.map((k) => `${k.nome} (dbv ${kzIA(k.valor_dbv)}, direcção ${kzIA(k.valor_dir)})`).join('; ')}`;
+  if (it.length) o += `\nMATERIAL (quantos já têm): ${it.map((i) => `${i.nome} ${i.n}/${ps.length}`).join('; ')}`;
+  return o;
+}
+async function contextoIA(DB, u, q) {
+  const ev = await DB.prepare('SELECT * FROM evento WHERE id=1').first();
+  let o = `EVENTO: ${ev.nome}, ${ev.local}, de ${ev.inicio} a ${ev.fim}. Taxa de inscrição: desbravador ${kzIA(ev.taxa_dbv)}, direcção ${kzIA(ev.taxa_dir)}. Transporte: ${kzIA(ev.transporte)} por pessoa. Prazo de cobrança aos membros: ${ev.prazo_cobranca}. Prazo do transporte: ${ev.prazo_transporte}. Hoje: ${hoje()}.
+NOTA: o transporte passa por 3 etapas (recolhido pelo director → reportado à Missão → validado pela Missão); para a Missão só conta como pago o validado.\n`;
+  const w = u.papel === 'director' ? 'WHERE c.id=' + +u.clube_id : u.papel === 'regional' ? 'WHERE c.regiao_id=' + +u.regiao_id : '';
+  const cl = (await DB.prepare(`SELECT c.id, c.nome, c.inscritos_oficial, r.nome regiao, COALESCE(d.nome, c.contacto_nome) dir, COALESCE(d.telefone, c.contacto_tel) tel FROM clubes c JOIN regioes r ON r.id=c.regiao_id
+    LEFT JOIN utilizadores d ON d.clube_id=c.id AND d.papel='director' AND COALESCE(d.funcao,'director')='director' AND d.ativo=1 ${w} GROUP BY c.id ORDER BY r.nome, c.nome`).all()).results;
+  const m = await metricas(DB, cl.map((c) => c.id), u.papel !== 'director');
+  const linha = (c) => { const x = m[c.id] || {}, insc = Math.max(c.inscritos_oficial ?? 0, x.n || 0);
+    return `${c.nome} [${c.regiao}] | director ${c.dir || '—'} ${c.tel || ''} | inscritos ${insc} (com nome ${x.n || 0}, sem nome ${Math.max(0, insc - (x.n || 0))}; ${x.dbv || 0} dbv, ${x.dir || 0} direcção) | recebido ${kzIA(x.recebido)} de ${kzIA(x.devido)} | transporte: recolhido ${x.transp_rec || 0}, à espera de validação ${x.transp_rep || 0}, validado ${x.transp_val || 0} | alertas: ${(x.alertas || []).join('; ') || 'nenhum'}`; };
+  if (u.papel === 'director') {
+    const c = cl[0]; if (!c) return o + 'Sem clube.';
+    o += `\nO SEU CLUBE: ${linha(c)}\n` + await detalheClubeIA(DB, c, ev);
+    const pd = (await DB.prepare("SELECT tipo, nome, estado FROM pedidos WHERE clube_id=? ORDER BY id DESC LIMIT 10").bind(c.id).all()).results;
+    if (pd.length) o += `\nPEDIDOS À MISSÃO: ${pd.map((x) => `${x.tipo} ${x.nome} (${x.estado})`).join('; ')}`;
+    return o;
+  }
+  // Regional e Missão: totais por região + uma linha por clube
+  const reg = {};
+  for (const c of cl) { const x = m[c.id] || {}, r = (reg[c.regiao] ||= { cl: 0, insc: 0, n: 0, rec: 0, dev: 0, tv: 0, tr: 0 }), insc = Math.max(c.inscritos_oficial ?? 0, x.n || 0);
+    r.cl++; r.insc += insc; r.n += x.n || 0; r.rec += x.recebido || 0; r.dev += x.devido || 0; r.tv += x.transp_val || 0; r.tr += x.transp_rec || 0; }
+  const T = Object.values(reg).reduce((a, r) => ({ cl: a.cl + r.cl, insc: a.insc + r.insc, n: a.n + r.n }), { cl: 0, insc: 0, n: 0 });
+  o += `\nÂMBITO: ${u.papel === 'regional' ? 'região ' + (cl[0]?.regiao || '') : 'toda a Missão'} — ${T.cl} clubes, ${T.insc} inscritos (${T.n} com nome, ${T.insc - T.n} sem nome).\nTOTAIS POR REGIÃO:\n`;
+  o += Object.entries(reg).map(([n, r]) => `${n}: ${r.cl} clubes | ${r.insc} inscritos (${r.n} com nome) | recebido ${kzIA(r.rec)} de ${kzIA(r.dev)} | transporte validado ${r.tv}, recolhido ${r.tr}`).join('\n');
+  o += `\nCLUBES:\n` + cl.map(linha).join('\n');
+  const wr = u.papel === 'regional' ? 'AND c.regiao_id=' + +u.regiao_id : '';
+  const [cs, pd, rm] = await DB.batch([
+    DB.prepare(`SELECT k.titulo, k.prioridade, k.estado, c.nome clube FROM casos k LEFT JOIN clubes c ON c.id=k.clube_id WHERE k.estado<>'Resolvido' ${wr} ORDER BY k.id DESC LIMIT 25`),
+    DB.prepare(`SELECT x.tipo, x.nome, c.nome clube FROM pedidos x JOIN clubes c ON c.id=x.clube_id WHERE x.estado='pendente' ${wr} LIMIT 25`),
+    DB.prepare(`SELECT x.n, x.valor, c.nome clube FROM remessas x JOIN clubes c ON c.id=x.clube_id WHERE x.estado='pendente' ${wr}`)]);
+  if (cs.results.length) o += `\nCASOS ABERTOS NA SECRETARIA: ${cs.results.map((k) => `${k.clube || 'geral'}: ${k.titulo} (${k.prioridade}, ${k.estado})`).join('; ')}`;
+  if (pd.results.length) o += `\nPEDIDOS PENDENTES: ${pd.results.map((x) => `${x.clube}: ${x.tipo} ${x.nome}`).join('; ')}`;
+  if (rm.results.length) o += `\nTRANSPORTE À ESPERA DE VALIDAÇÃO: ${rm.results.map((x) => `${x.clube}: ${x.n} pessoas, ${kzIA(x.valor)}`).join('; ')}`;
+  // se a pergunta nomeia um clube do âmbito, junta os nomes desse clube (máx. 2)
+  const nq = nrmIA(q), alvo = cl.filter((c) => c.nome.length > 3 && nq.includes(nrmIA(c.nome))).sort((a, b) => b.nome.length - a.nome.length).slice(0, 2);
+  for (const c of alvo) o += '\n' + await detalheClubeIA(DB, c, ev);
+  return o;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(req);
-    try { return await api(req, env.DB, url); }
+    try { return await api(req, env.DB, url, env); }
     catch (e) { return json({ erro: e instanceof E ? e.message : 'Erro interno: ' + e.message }, e.s || 500); }
   },
 };
 
-async function api(req, DB, url) {
+async function api(req, DB, url, env = {}) {
   const p = url.pathname.split('/').slice(2).filter(Boolean), M = req.method;
   const body = async () => { try { return await req.json(); } catch { return {}; } };
 
@@ -175,6 +231,43 @@ async function api(req, DB, url) {
     const salt = rnd(16);
     await DB.prepare('UPDATE utilizadores SET senha_hash=?, salt=?, trocar_senha=0 WHERE id=?').bind(await hash(b.nova, salt), salt, u.id).run();
     return json({ ok: true });
+  }
+
+  // ---- ASSISTENTE IA: responde só com os dados que o utilizador pode ver ----
+  if (p[0] === 'ia' && M === 'POST') {
+    if (!env.AI && !env.IA_TESTE) throw new E('O assistente ainda não está ligado (falta a ligação "AI" no wrangler.jsonc).', 503);
+    await DB.prepare('CREATE TABLE IF NOT EXISTS ia_uso (user_id INTEGER, dia TEXT, n INTEGER DEFAULT 0, PRIMARY KEY (user_id, dia))').run();
+    const lim = { director: 20, regional: 30, missao: 60 }[u.papel] || 20;
+    const uso = (await DB.prepare('SELECT n FROM ia_uso WHERE user_id=? AND dia=?').bind(u.id, hoje()).first())?.n || 0;
+    if (uso >= lim) throw new E(`Já fez ${lim} perguntas hoje. O assistente volta amanhã.`, 429);
+    const b = await body(), q = String(b.pergunta || '').trim().slice(0, 500);
+    if (q.length < 3) throw new E('Escreva a pergunta');
+    const hist = (Array.isArray(b.historico) ? b.historico : []).slice(-6).filter((m) => ['user', 'assistant'].includes(m.role)).map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 1500) }));
+    const ctx = await contextoIA(DB, u, q);
+    const sys = `És o assistente da app "Campori 2026" (II Campori dos Desbravadores da UNA, Missão Sul de Luanda e Cabinda).
+Responde em português de Angola/Portugal, de forma curta, clara e directa. Usa listas curtas quando ajudar.
+REGRAS:
+- Responde APENAS com base nos DADOS abaixo. Se a resposta não estiver nos dados, diz que não tens essa informação na app e sugere onde ver (ex.: "abra o clube na aba Clubes").
+- Nunca inventes nomes, números ou valores. Usa os totais já calculados nos dados; não refaças contas grandes.
+- Quem pergunta: ${u.nome} (${ {director: 'director do clube', regional: 'coordenador regional', missao: 'coordenação da Missão'}[u.papel] }). Só podes falar do que está nos dados (o âmbito de acesso dessa pessoa).
+- Nunca dês dados de saúde (não estão nos dados) nem contactos de encarregados.
+- Valores em Kz com ponto nos milhares (ex.: 22.000 Kz).
+DADOS DA APP (actualizados agora, ${hoje()}):
+${ctx}`;
+    const msgs = [{ role: 'system', content: sys }, ...hist, { role: 'user', content: q }];
+    if (env.IA_TESTE && !env.AI) return json({ resposta: 'Resposta de teste para: ' + q, restam: lim - uso - 1, contexto: ctx }); // só em testes locais
+    let txt = '', ult = null;
+    for (const mod of ['@cf/google/gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash']) {
+      try {
+        const r = await env.AI.run(mod, { messages: msgs, max_tokens: 700, temperature: 0.2 });
+        txt = (r?.response ?? r?.choices?.[0]?.message?.content ?? '').toString().trim();
+        if (txt) break;
+      } catch (e) { ult = e; if (/neuron|quota|limit|429|4006/i.test(String(e.message))) break; }
+    }
+    if (!txt) throw new E(/neuron|quota|limit|429|4006/i.test(String(ult?.message)) ? 'A quota diária gratuita da IA esgotou. Tente amanhã.' : 'O assistente não respondeu. Tente de novo daqui a pouco.', 503);
+    txt = txt.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    await DB.prepare('INSERT INTO ia_uso (user_id,dia,n) VALUES (?,?,1) ON CONFLICT(user_id,dia) DO UPDATE SET n=n+1').bind(u.id, hoje()).run();
+    return json({ resposta: txt, restam: lim - uso - 1 });
   }
 
   // procurar pessoas (lupa do topo, Regional / Missão)

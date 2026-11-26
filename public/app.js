@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '4.9.1';
+const VERSAO = '5.0.1';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -19,7 +19,10 @@ const IC = {
   secretaria: I('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3M9 10h6M9 14h6M9 18h3"/>'),
   avisos: I('<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15 9a3 3 0 0 1 0 6M18 6a7 7 0 0 1 0 12"/>'),
   sino: I('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
+  gerir: I('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  editar: I('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   tel: I('<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>'),
+  ia: I('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7l1 2.5L15.5 10 13 11l-1 2.5L11 11l-2.5-1L11 9.5z"/>'),
   lupa: I('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>'),
   ok: I('<path d="M20 6 9 17l-5-5"/>'),
   print: I('<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>'),
@@ -136,11 +139,12 @@ function render() {
   const r = rota(), u = S.me.user, escuro = document.documentElement.dataset.tema === 'escuro';
   $('#app').innerHTML = `${navigator.onLine ? '' : '<div class="off">Sem internet</div>'}
   <header class="top"><img class="logo" src="/logo.png" alt=""><div class="tt"><b>Maranata, ${esc(u.nome.split(' ')[0])}</b><small>${esc(S.me.clube?.nome || S.me.regiao?.nome || 'Coordenação da Missão')}</small></div>
-   ${coord() ? `<button class="ib" id="lp" title="Procurar">${IC.lupa}</button>` : `<button class="ib" id="sn" title="Avisos">${IC.sino}${S.naoLidos ? `<span class="dot">${S.naoLidos}</span>` : ''}</button>`}<button class="ib" id="bt" title="Tema">${escuro ? IC.sol : IC.lua}</button><button class="sair" id="bs">${IC.sair}<span>Sair</span></button></header>
+   ${coord() ? `<button class="ib" id="lp" title="Procurar">${IC.lupa}</button>` : `<button class="ib" id="sn" title="Avisos">${IC.sino}${S.naoLidos ? `<span class="dot">${S.naoLidos}</span>` : ''}</button>`}<button class="ib ia" id="bia" title="Assistente">${IC.ia}</button><button class="ib" id="bt" title="Tema">${escuro ? IC.sol : IC.lua}</button><button class="sair" id="bs">${IC.sair}<span>Sair</span></button></header>
   <div class="wrap"><nav class="side">${[...abas()].sort((a, b) => (b[0] === 'painel') - (a[0] === 'painel')).map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}">${IC[k]}${n}</a>`).join('')}<div class="sep">v${VERSAO}</div></nav><main id="main"><div class="empty">A carregar…</div></main></div>
   <nav class="nav">${abas().map(([k, n]) => `<a href="#/${k}" class="${naBarra(r, k) ? 'on' : ''}${k === 'painel' ? ' centro' : ''}">${k === 'painel' ? `<span class="bola">${IC[k]}</span>` : IC[k]}${n}</a>`).join('')}</nav>`;
   $('#bs').onclick = () => sair();
   if ($('#lp')) $('#lp').onclick = mProcurar;
+  $('#bia').onclick = mAssistente;
   if ($('#sn')) $('#sn').onclick = () => (location.hash = '#/avisos');
   $('#bt').onclick = () => { st.set('cs_tema', escuro ? 'claro' : 'escuro'); tema(); renderTudo(); };
   const main = $('#main');
@@ -476,7 +480,7 @@ const ALERTAS = [['nomes', 'Com nomes por adicionar', (c) => semNomeDe(c) > 0], 
 const inscritosDe = (c) => Math.max(c.inscritos_oficial ?? 0, c.n), semNomeDe = (c) => Math.max(0, (c.inscritos_oficial ?? 0) - c.n);
 const oficiais = (ls) => ({ of: ls.reduce((a, c) => a + inscritosDe(c), 0), sem: ls.reduce((a, c) => a + semNomeDe(c), 0) });
 // contacto do director: botões WhatsApp e Ligar
-const botoesContacto = (nome, t, clube) => t ? `<a class="tag ok" target="_blank" rel="noopener" href="${wa(t, `Maranata${nome ? ', ' + nome.split(' ')[0] : ''}! Sobre o Campori do clube ${clube}: `)}">WhatsApp</a> <a class="tag b" href="tel:+244${String(t).replace(/\D/g, '').slice(-9)}">Ligar</a>` : '';
+const botoesContacto = (nome, t, clube) => t ? `<a class="acao wa" target="_blank" rel="noopener" href="${wa(t, `Maranata${nome ? ', ' + nome.split(' ')[0] : ''}! Sobre o Campori do clube ${clube}: `)}">${IC.wa}<span>WhatsApp</span></a><a class="acao ligar" href="tel:+244${String(t).replace(/\D/g, '').slice(-9)}">${IC.tel}<span>Ligar</span></a>` : '';
 const verClubes = (r, a) => { reg = r || ''; alertaF = a || ''; busca = ''; location.hash = '#/visao'; };
 V.visao = async (el) => {
   if (papel() === 'director') return V.painel(el);
@@ -491,10 +495,10 @@ V.visao = async (el) => {
   <div class="tools" style="margin-top:12px"><input type="search" id="bu" placeholder="Procurar clube ou director…" value="${esc(busca)}">
    ${M ? `<select id="rg"><option value="">Todas as regiões</option>${[...new Set(ls.map((c) => c.regiao))].sort().map((r) => `<option ${r === reg ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>` : ''}
    <select id="fa"><option value="">Todos os clubes</option>${ALERTAS.map(([k, t]) => `<option value="${k}" ${alertaF === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
-  <div class="list" id="lst">${f.map((c) => `<div class="row" data-id="${c.id}" data-txt="${esc(norm(c.nome + ' ' + c.regiao + ' ' + (c.ct_nome || '') + ' ' + (c.ct_tel || '')))}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} com nome${semNomeDe(c) ? ` · <b style="color:var(--red)">faltam ${semNomeDe(c)} nomes</b> (oficial ${c.inscritos_oficial})` : ''} <br>👤 ${c.ct_nome ? esc(c.ct_nome) : '<span style="color:var(--red)">sem nome do director</span>'}${c.ct_tel ? ' · ' + esc(c.ct_tel) : ' · <span style="color:var(--red)">sem telefone</span>'}${c.dir_id ? '' : ' · <span style="color:var(--mut)">sem acesso à app</span>'}</small>
+  <div class="list" id="lst">${f.map((c) => `<div class="row clube" data-id="${c.id}" data-txt="${esc(norm(c.nome + ' ' + c.regiao + ' ' + (c.ct_nome || '') + ' ' + (c.ct_tel || '')))}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} com nome${semNomeDe(c) ? ` · <b style="color:var(--red)">faltam ${semNomeDe(c)} nomes</b> (oficial ${c.inscritos_oficial})` : ''} <br>👤 ${c.ct_nome ? esc(c.ct_nome) : '<span style="color:var(--red)">sem nome do director</span>'}${c.ct_tel ? ' · ' + esc(c.ct_tel) : ' · <span style="color:var(--red)">sem telefone</span>'}${c.dir_id ? '' : ' · <span style="color:var(--mut)">sem acesso à app</span>'}</small>
     <div style="display:flex;gap:10px;margin-top:6px"><div style="flex:1"><small style="color:var(--mut)">Pago ${c.pct_pago}%</small><div class="bar ${c.pct_pago < 40 ? 'r' : c.pct_pago < 80 ? 'o' : ''}"><span style="width:${c.pct_pago}%"></span></div></div><div style="flex:1"><small style="color:var(--mut)">Checklist ${pct(c.feitas, c.total)}%</small><div class="bar ${pct(c.feitas, c.total) < 40 ? 'r' : 'o'}"><span style="width:${pct(c.feitas, c.total)}%"></span></div></div></div>
     <div>${c.pedidos ? `<span class="tag w">📨 ${c.pedidos} pedido(s)</span>` : ''}${c.alertas.map((a) => `<span class="tag no">${esc(a)}</span>`).join('')}</div></div>
-    <div class="v">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}${M ? `<br><button class="tag b" data-dir="${c.id}">⚙️ Gerir</button>` : ''}</div></div>`).join('') || `<div class="empty">${reg || alertaF ? 'Nenhum clube com estes filtros.' : 'Sem clubes.'}</div>`}</div>
+    ${c.ct_tel || M ? `<div class="acoes">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}${M ? `<button class="acao gerir" data-dir="${c.id}">${IC.gerir}<span>Gerir</span></button>` : ''}</div>` : ''}</div>`).join('') || `<div class="empty">${reg || alertaF ? 'Nenhum clube com estes filtros.' : 'Sem clubes.'}</div>`}</div>
   <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button><button class="btn sec" id="pds">📨 Pedidos</button><button class="btn sec" id="rms">🚌 Transporte</button>${M ? '<button class="btn gold" id="im">Importar clubes</button><button class="btn gold" id="ia">Importar acampantes (todos os clubes)</button><button class="btn gold" id="ic">Importar contactos dos directores</button><button class="btn sec" id="rgs">Regionais</button><button class="btn sec" id="cdn">Coordenação</button>' : ''}</div>`;
   $('#bu').oninput = (e) => { busca = e.target.value; filtraLinhas($('#lst'), busca); };
   if (busca) filtraLinhas($('#lst'), busca);
@@ -585,6 +589,34 @@ async function mRemessas() {
       try { const r = await api('PUT', '/remessas/' + x.id, { acao: 'validar', excluir: fora }); toast(`Validado: ${r.validados} pessoa(s) · ${kz(r.valor)}`); mRemessas(); renderTudo(); } catch (er) { toast(er.message, 1); } }));
     m.querySelectorAll('[data-rec]').forEach((b) => (b.onclick = async () => { const nota = prompt('Motivo da recusa (o director vai ver):'); if (nota === null) return;
       try { await api('PUT', '/remessas/' + b.dataset.rec, { acao: 'recusar', nota }); toast('Recusado'); mRemessas(); renderTudo(); } catch (er) { toast(er.message, 1); } }));
+  });
+}
+
+// ===================== ASSISTENTE IA =====================
+let iaHist = [];
+const mdIA = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4}\s*(.+)$/gm, '<b>$1</b>').replace(/^\s*[-*•]\s+/gm, '• ').replace(/\n/g, '<br>');
+function mAssistente() {
+  const P = { director: ['Quem ainda não pagou a inscrição?', 'Quantos já pagaram o transporte e quanto falta?', 'Quem não tem autorização dos pais?', 'Resumo do meu clube'],
+    regional: ['Que clubes da minha região têm nomes em falta?', 'Quanto já foi recebido na minha região?', 'Que clubes ainda não reportaram o transporte?', 'Resumo da minha região'],
+    missao: ['Resumo geral da Missão', 'Que regiões têm mais nomes em falta?', 'Que clubes têm transporte à espera de validação?', 'Quais os 10 clubes com menos pagamentos?'] }[S.me.user.papel] || [];
+  modal(`<h3>💬 Assistente do Campori</h3><p class="sub" style="margin:0">Responde só com os dados da app que pode ver. É uma IA: confirme os números importantes.</p>
+   <div id="chat" class="chat"></div>
+   <div class="chips" id="sug">${P.map((x) => `<button type="button">${esc(x)}</button>`).join('')}</div>
+   <form id="fq" class="chatf"><input id="q" placeholder="Escreva a sua pergunta…" autocomplete="off" maxlength="500"><button class="btn" id="env">Enviar</button></form>
+   <div class="acts"><button type="button" class="btn sec sm" id="lim">Limpar conversa</button><button type="button" class="btn sec sm" onclick="fechar()">Fechar</button></div>`, (m) => {
+    const chat = $('#chat', m), pinta = () => { chat.innerHTML = iaHist.map((x) => `<div class="msg ${x.role === 'user' ? 'eu' : 'ia'}">${x.role === 'user' ? esc(x.content) : mdIA(x.content)}</div>`).join('') || '<p class="sub">Faça uma pergunta ou toque numa sugestão.</p>'; chat.scrollTop = chat.scrollHeight; };
+    pinta();
+    const pergunta = async (q) => {
+      q = q.trim(); if (!q) return; $('#q', m).value = ''; $('#env', m).disabled = true; $('#sug', m).hidden = true;
+      const hist = iaHist.slice(-6); iaHist.push({ role: 'user', content: q }); pinta();
+      chat.insertAdjacentHTML('beforeend', '<div class="msg ia pensa">A pensar…</div>'); chat.scrollTop = chat.scrollHeight;
+      try { const r = await api('POST', '/ia', { pergunta: q, historico: hist }); iaHist.push({ role: 'assistant', content: r.resposta }); }
+      catch (e) { iaHist.push({ role: 'assistant', content: '⚠️ ' + e.message }); }
+      pinta(); $('#env', m).disabled = false; $('#q', m).focus();
+    };
+    $('#fq', m).onsubmit = (e) => { e.preventDefault(); pergunta($('#q', m).value); };
+    $('#sug', m).querySelectorAll('button').forEach((b) => (b.onclick = () => pergunta(b.textContent)));
+    $('#lim', m).onclick = () => { iaHist = []; $('#sug', m).hidden = false; pinta(); };
   });
 }
 
@@ -902,7 +934,8 @@ V.clube = async (el) => {
   if (!c) { location.hash = '#/visao'; return; }
   const T = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ['pagamentos', 'Pagamentos'], ...(missao() ? [['fichas', 'Fichas']] : []), ['material', 'Material'], ['tarefas', 'Checklist']];
   el.innerHTML = `<p class="sub noprint" style="margin:0 0 6px"><a href="#/visao">← Clubes</a></p><h1>${esc(c.nome)}</h1><p class="sub">${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}${pode() ? '' : ' · só leitura'}</p>
-   <div class="clubebar noprint"><span>👤 <b>${esc(c.contacto_nome || 'Sem contacto do director')}</b>${c.contacto_tel ? ' · ' + esc(c.contacto_tel) : ''}</span><span>${botoesContacto(c.contacto_nome, c.contacto_tel, c.nome)} <button class="tag" id="ec">Editar</button></span></div>${missao() ? `<div class="acts noprint" style="margin:6px 0 0"><button class="btn sec sm" id="gerir">⚙️ Gerir clube: editar nome, remover, acesso</button></div>` : ''}
+   <div class="card noprint" style="margin-bottom:12px"><div>👤 <b>${esc(c.contacto_nome || 'Sem contacto do director')}</b>${c.contacto_tel ? ' · ' + esc(c.contacto_tel) : ''}</div>
+    <div class="acoes">${botoesContacto(c.contacto_nome, c.contacto_tel, c.nome)}<button class="acao" id="ec">${IC.editar}<span>Editar</span></button>${missao() ? `<button class="acao gerir largo" id="gerir">${IC.gerir}<span>Gerir clube (nome, oficial, acesso, remover)</span></button>` : ''}</div></div>
    <div class="chips noprint">${T.map(([k, n]) => `<button data-s="${k}" class="${sub === k ? 'on' : ''}">${n}</button>`).join('')}</div><div id="sv"></div>`;
   el.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => (location.hash = '#/clube/' + b.dataset.s)));
   if ($('#gerir', el)) $('#gerir', el).onclick = async () => { const v = await api('GET', '/visao'); const x = v.find((y) => y.id === c.id); if (x) mAcesso(x); };
@@ -996,7 +1029,7 @@ async function mAcesso(c) {
     <div class="acts"><button class="btn" id="gec">Guardar</button></div></details>
    <h3 style="margin-top:10px">Contacto do director</h3><p class="sub" style="margin:0">Para contactar o clube, mesmo que o director ainda não use a app.</p>
    <div class="fl"><div><label>Nome</label><input id="cn" value="${esc(c.contacto_nome || c.dir_nome || '')}"></div><div><label>Telefone</label><input id="ct" inputmode="tel" value="${esc(c.contacto_tel || c.dir_tel || '')}"></div></div>
-   <div class="acts" style="margin-top:8px">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}<button class="btn sec sm" id="gct">Guardar contacto</button></div>
+   ${c.ct_tel ? `<div class="acoes">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}</div>` : ''}<div class="acts" style="margin-top:8px"><button class="btn sec sm" id="gct">Guardar contacto</button></div>
    <h3 style="margin-top:18px">Acesso à app</h3>${c.dir_id ? `<p>Director: <b>${esc(c.dir_nome)}</b><br>${esc(c.dir_tel || c.dir_email || '')}</p><div class="acts"><button class="btn gold" id="rs">Repor senha</button></div><h3 style="margin-top:18px">Trocar de director</h3>` : '<p class="sub">Este clube ainda não tem director com acesso.</p>'}
    <form id="f"><label>Nome</label><input name="nome" required value="${c.dir_id ? '' : esc(c.contacto_nome || '')}"><label>Telefone</label><input name="telefone" inputmode="tel" required value="${c.dir_id ? '' : esc(c.contacto_tel || '')}"><div class="acts"><button type="button" class="btn sec" onclick="fechar()">Fechar</button><button class="btn">Criar acesso</button></div></form>
    <h3 style="margin-top:18px">Inscritos oficiais</h3><div style="display:flex;gap:8px"><input id="io" type="number" min="0" inputmode="numeric" value="${c.inscritos_oficial ?? ''}" placeholder="Nº oficial"><button class="btn sec" id="gio">Guardar</button></div>
