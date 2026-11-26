@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '4.9';
+const VERSAO = '4.9.1';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -494,7 +494,7 @@ V.visao = async (el) => {
   <div class="list" id="lst">${f.map((c) => `<div class="row" data-id="${c.id}" data-txt="${esc(norm(c.nome + ' ' + c.regiao + ' ' + (c.ct_nome || '') + ' ' + (c.ct_tel || '')))}"><div class="t"><b>${esc(c.nome)}</b><small>${esc(c.regiao)} · ${c.n} com nome${semNomeDe(c) ? ` · <b style="color:var(--red)">faltam ${semNomeDe(c)} nomes</b> (oficial ${c.inscritos_oficial})` : ''} <br>👤 ${c.ct_nome ? esc(c.ct_nome) : '<span style="color:var(--red)">sem nome do director</span>'}${c.ct_tel ? ' · ' + esc(c.ct_tel) : ' · <span style="color:var(--red)">sem telefone</span>'}${c.dir_id ? '' : ' · <span style="color:var(--mut)">sem acesso à app</span>'}</small>
     <div style="display:flex;gap:10px;margin-top:6px"><div style="flex:1"><small style="color:var(--mut)">Pago ${c.pct_pago}%</small><div class="bar ${c.pct_pago < 40 ? 'r' : c.pct_pago < 80 ? 'o' : ''}"><span style="width:${c.pct_pago}%"></span></div></div><div style="flex:1"><small style="color:var(--mut)">Checklist ${pct(c.feitas, c.total)}%</small><div class="bar ${pct(c.feitas, c.total) < 40 ? 'r' : 'o'}"><span style="width:${pct(c.feitas, c.total)}%"></span></div></div></div>
     <div>${c.pedidos ? `<span class="tag w">📨 ${c.pedidos} pedido(s)</span>` : ''}${c.alertas.map((a) => `<span class="tag no">${esc(a)}</span>`).join('')}</div></div>
-    <div class="v">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}${M ? `<br><button class="tag b" data-dir="${c.id}">Acesso</button>` : ''}</div></div>`).join('') || `<div class="empty">${reg || alertaF ? 'Nenhum clube com estes filtros.' : 'Sem clubes.'}</div>`}</div>
+    <div class="v">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}${M ? `<br><button class="tag b" data-dir="${c.id}">⚙️ Gerir</button>` : ''}</div></div>`).join('') || `<div class="empty">${reg || alertaF ? 'Nenhum clube com estes filtros.' : 'Sem clubes.'}</div>`}</div>
   <div class="acts noprint"><button class="btn sec" id="ex">${IC.csv} Excel (CSV)</button><button class="btn sec" id="pds">📨 Pedidos</button><button class="btn sec" id="rms">🚌 Transporte</button>${M ? '<button class="btn gold" id="im">Importar clubes</button><button class="btn gold" id="ia">Importar acampantes (todos os clubes)</button><button class="btn gold" id="ic">Importar contactos dos directores</button><button class="btn sec" id="rgs">Regionais</button><button class="btn sec" id="cdn">Coordenação</button>' : ''}</div>`;
   $('#bu').oninput = (e) => { busca = e.target.value; filtraLinhas($('#lst'), busca); };
   if (busca) filtraLinhas($('#lst'), busca);
@@ -902,9 +902,10 @@ V.clube = async (el) => {
   if (!c) { location.hash = '#/visao'; return; }
   const T = [['painel', 'Painel'], ['pessoas', 'Acampantes'], ['pagamentos', 'Pagamentos'], ...(missao() ? [['fichas', 'Fichas']] : []), ['material', 'Material'], ['tarefas', 'Checklist']];
   el.innerHTML = `<p class="sub noprint" style="margin:0 0 6px"><a href="#/visao">← Clubes</a></p><h1>${esc(c.nome)}</h1><p class="sub">${esc(c.regiao)}${c.igreja ? ' · ' + esc(c.igreja) : ''}${pode() ? '' : ' · só leitura'}</p>
-   <div class="clubebar noprint"><span>👤 <b>${esc(c.contacto_nome || 'Sem contacto do director')}</b>${c.contacto_tel ? ' · ' + esc(c.contacto_tel) : ''}</span><span>${botoesContacto(c.contacto_nome, c.contacto_tel, c.nome)} <button class="tag" id="ec">Editar</button></span></div>
+   <div class="clubebar noprint"><span>👤 <b>${esc(c.contacto_nome || 'Sem contacto do director')}</b>${c.contacto_tel ? ' · ' + esc(c.contacto_tel) : ''}</span><span>${botoesContacto(c.contacto_nome, c.contacto_tel, c.nome)} <button class="tag" id="ec">Editar</button></span></div>${missao() ? `<div class="acts noprint" style="margin:6px 0 0"><button class="btn sec sm" id="gerir">⚙️ Gerir clube: editar nome, remover, acesso</button></div>` : ''}
    <div class="chips noprint">${T.map(([k, n]) => `<button data-s="${k}" class="${sub === k ? 'on' : ''}">${n}</button>`).join('')}</div><div id="sv"></div>`;
   el.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => (location.hash = '#/clube/' + b.dataset.s)));
+  if ($('#gerir', el)) $('#gerir', el).onclick = async () => { const v = await api('GET', '/visao'); const x = v.find((y) => y.id === c.id); if (x) mAcesso(x); };
   $('#ec', el).onclick = () => modal(`<h3>Contacto do director · ${esc(c.nome)}</h3><label>Nome</label><input id="cn" value="${esc(c.contacto_nome || '')}"><label>Telefone</label><input id="ct" inputmode="tel" value="${esc(c.contacto_tel || '')}">
     <div class="acts"><button class="btn sec" onclick="fechar()">Cancelar</button><button class="btn" id="gct">Guardar</button></div>`, (m) => {
     $('#gct', m).onclick = async () => { try { await api('PUT', '/contacto/' + c.id, { nome: $('#cn', m).value, telefone: $('#ct', m).value }); S.clubes = await api('GET', '/clubes'); fechar(); toast('Contacto guardado'); render(); } catch (e) { toast(e.message, 1); } }; });
