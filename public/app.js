@@ -1,6 +1,6 @@
 /* Campori — versão simples */
 'use strict';
-const VERSAO = '4.7';
+const VERSAO = '4.9';
 const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
   painel: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
@@ -78,6 +78,20 @@ async function iniciar() {
   if (S.me.user.trocar_senha) setTimeout(() => mSenha(true), 300);
 }
 async function sair(sil) { if (!sil) await api('POST', '/logout').catch(() => {}); S.token = null; S.me = null; st.set('cs_token', null); history.replaceState(null, '', '/'); vLogin(); }
+// ---------- instalar a app no telemóvel / computador ----------
+let pedidoInstalar = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); pedidoInstalar = e; document.querySelectorAll('.inst').forEach((b) => (b.hidden = false)); });
+addEventListener('appinstalled', () => { pedidoInstalar = null; document.querySelectorAll('.inst').forEach((b) => (b.hidden = true)); toast('App instalada ✓'); });
+const instalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const botaoInstalar = (cls = 'btn gold') => (instalada() ? '' : `<button type="button" class="${cls} inst" onclick="mInstalar()">📲 Instalar a app</button>`);
+async function mInstalar() {
+  if (pedidoInstalar) { pedidoInstalar.prompt(); const r = await pedidoInstalar.userChoice; if (r.outcome === 'accepted') pedidoInstalar = null; return; }
+  const ua = navigator.userAgent, ios = /iphone|ipad|ipod/i.test(ua) || (/macintosh/i.test(ua) && 'ontouchend' in document), android = /android/i.test(ua);
+  const passos = ios ? `<p><b>iPhone / iPad</b> (no <b>Safari</b>):</p><ol><li>Toque no botão <b>Partilhar</b> (quadrado com seta para cima) em baixo.</li><li>Desça e toque em <b>Adicionar ao ecrã principal</b>.</li><li>Toque em <b>Adicionar</b>.</li></ol><p class="sub">Se abriu o link dentro do WhatsApp, toque primeiro em ⋯ → <b>Abrir no Safari</b>.</p>`
+    : android ? `<p><b>Android</b> (no <b>Chrome</b>):</p><ol><li>Toque no menu <b>⋮</b> no canto de cima.</li><li>Toque em <b>Instalar aplicação</b> ou <b>Adicionar ao ecrã inicial</b>.</li><li>Confirme em <b>Instalar</b>.</li></ol><p class="sub">Se abriu o link dentro do WhatsApp, toque primeiro em ⋮ → <b>Abrir no Chrome</b>.</p>`
+    : `<p><b>Computador</b> (Chrome ou Edge):</p><ol><li>Na barra do endereço, à direita, clique no ícone <b>Instalar</b> (ecrã com seta).</li><li>Ou no menu <b>⋮</b> → <b>Transmitir, guardar e partilhar</b> → <b>Instalar página como app</b>.</li></ol>`;
+  modal(`<h3>📲 Instalar a app Campori 2026</h3><p class="sub">Fica com o ícone no ecrã, abre como uma app normal e não precisa de procurar o link.</p>${passos}<div class="acts"><button class="btn" onclick="fechar()">Percebi</button></div>`);
+}
 function ecraEntrada(titulo, sub, campos, botao, fn, rodape = '') {
   $('#app').innerHTML = `<div class="login"><form class="card" id="f"><img class="logo" src="/logo.png" alt=""><h1>${titulo}</h1><p class="sub">${sub}</p>${campos}<button class="btn">${botao}</button>${rodape}</form></div>`;
   $('#f').onsubmit = async (e) => { e.preventDefault(); const b = $('button', e.target); b.disabled = true; try { await fn(Object.fromEntries(new FormData(e.target))); } catch (er) { toast(er.message, 1); b.disabled = false; } };
@@ -85,7 +99,7 @@ function ecraEntrada(titulo, sub, campos, botao, fn, rodape = '') {
 async function entrar(l, s) { S.token = (await api('POST', '/login', { login: l, senha: s })).token; st.set('cs_token', S.token); history.replaceState(null, '', '/'); await iniciar(); }
 function vLogin() {
   ecraEntrada('Campori 2026', 'Desbravadores · MSC', '<label>Telefone ou e-mail</label><input name="l" autocomplete="username" inputmode="email" required><label>Senha</label><input name="s" type="password" autocomplete="current-password" required>',
-    'Entrar', (f) => entrar(f.l, f.s), '<p class="sub" style="margin-top:14px;font-size:13px">Esqueceu a senha? Peça à Coordenação da Missão.</p>');
+    'Entrar', (f) => entrar(f.l, f.s), '<p class="sub" style="margin-top:14px;font-size:13px">Esqueceu a senha? Peça à Coordenação da Missão.</p>' + (instalada() ? '' : `<div style="margin-top:10px">${botaoInstalar('btn sec')}</div>`));
 }
 function vSetup() {
   ecraEntrada('Primeira configuração', 'Crie a conta da Coordenação da Missão.', '<label>Nome</label><input name="nome" required><label>E-mail</label><input name="email" type="email" required><label>Senha (mín. 6)</label><input name="senha" type="password" minlength="6" required>',
@@ -264,7 +278,7 @@ function mPedido(x) {
   });
 }
 function mImportarLista() {
-  modal(`<h3>Importar lista de acampantes</h3><p class="sub">Ficheiro CSV (Excel → Guardar como → CSV) ou linhas coladas, com o cabeçalho:<br><b>Nome;Categoria;Encarregado;Telefone</b><br>
+  modal(`<h3>Importar lista de acampantes</h3><p class="sub">Ficheiro CSV (Excel → Guardar como → CSV) ou linhas coladas, com o cabeçalho:<br><b>Nome;Categoria;Nascimento;Encarregado;Telefone</b><br>
    Categoria: Desbravador ou a função na direcção (Director, Líder, Conselheiro…). Só o nome é obrigatório. Nomes que já existem são ignorados.</p>
    <input type="file" id="fi" accept=".csv,.txt"><label>…ou cole aqui</label><textarea id="tx" placeholder="Nome;Categoria;Encarregado;Telefone"></textarea><p id="pv" class="sub"></p>
    <div class="acts"><button class="btn sec" onclick="fechar()">Cancelar</button><button class="btn" id="go" disabled>Importar</button></div>`, (m) => {
@@ -272,7 +286,7 @@ function mImportarLista() {
     const ler = (t) => { const R = t.replace(/\r/g, '').split('\n').filter((l) => l.trim()); if (!R.length) return [];
       const sep = R[0].includes(';') ? ';' : R[0].includes('\t') ? '\t' : ',', n = (x) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
       const cab = R[0].split(sep).map(n), col = (k) => cab.findIndex((h) => h.startsWith(k));
-      const ix = { nome: col('nome'), categoria: Math.max(col('categ'), col('func')), encarregado: col('encarreg'), telefone: Math.max(col('tel'), col('contact')), obs: col('obs') };
+      const ix = { nome: col('nome'), categoria: Math.max(col('categ'), col('func')), encarregado: col('encarreg'), telefone: Math.max(col('tel'), col('contact')), nascimento: Math.max(col('nasc'), col('data')), obs: col('obs') };
       if (ix.nome < 0) return R.map((l) => ({ nome: l.split(sep)[0] }));
       return R.slice(1).map((l) => { const v = l.split(sep).map((x) => x.trim().replace(/^"|"$/g, '')); return Object.fromEntries(Object.entries(ix).map(([k, i]) => [k, i >= 0 ? v[i] || '' : ''])); }); };
     const ver = (t) => { L = ler(t).filter((l) => l.nome); const d = L.filter((l) => /^(desbravador|aventureiro|dbv)?$/i.test(l.categoria || '')).length;
@@ -491,7 +505,7 @@ V.visao = async (el) => {
   el.querySelectorAll('[data-dir]').forEach((b) => (b.onclick = () => mAcesso(ls.find((c) => c.id === +b.dataset.dir))));
   if (M) { $('#im').onclick = mImportar; $('#rgs').onclick = mRegionais; $('#cdn').onclick = mCoordenacao; $('#ic').onclick = mImportarContactos; $('#ia').onclick = mImportarTodos; }
   $('#pds').onclick = mPedidos; if ($('#vp')) $('#vp').onclick = mPedidos; $('#rms').onclick = mRemessas; if ($('#vr')) $('#vr').onclick = mRemessas;
-  el.insertAdjacentHTML('beforeend', '<p class="sub noprint" style="text-align:center;margin-top:18px"><a href="#" id="cs">Trocar a minha senha</a></p>');
+  el.insertAdjacentHTML('beforeend', `<p class="sub noprint" style="text-align:center;margin-top:18px">${instalada() ? '' : '<a href="#" onclick="event.preventDefault();mInstalar()">📲 Instalar a app</a> · '}<a href="#" id="cs">Trocar a minha senha</a></p>`);
   $('#cs', el).onclick = (e) => { e.preventDefault(); mSenha(false); };
 };
 
@@ -578,7 +592,8 @@ async function mRemessas() {
 V.mais = async (el) => {
   const L = [['pagamentos', 'Pagamentos', 'Quem pagou o quê · transporte'], ['material', 'Material', 'Quem tem o quê'], ['tarefas', 'Checklist', 'Preparação do clube'], ['avisos', 'Avisos', 'Da Missão e da Região'], ['documentos', 'Documentos', 'Regulamento e outros']];
   el.innerHTML = `<h1>Mais</h1><div class="mais">${L.map(([k, n, d]) => `<a href="#/${k}">${IC[k]}${n}<br><small style="color:var(--mut);font-weight:400">${d}</small></a>`).join('')}
-   <a href="#" id="cs">${IC.sair}Trocar senha<br><small style="color:var(--mut);font-weight:400">${esc(S.me.user.login)}</small></a></div>`;
+   <a href="#" id="cs">${IC.sair}Trocar senha<br><small style="color:var(--mut);font-weight:400">${esc(S.me.user.login)}</small></a>
+   ${instalada() ? '' : `<a href="#" class="inst" onclick="event.preventDefault();mInstalar()"><span style="font-size:22px;display:block;line-height:24px">📲</span>Instalar a app<br><small style="color:var(--mut);font-weight:400">Ícone no ecrã do telemóvel</small></a>`}</div>`;
   $('#cs').onclick = (e) => { e.preventDefault(); mSenha(false); };
 };
 
@@ -969,16 +984,38 @@ function mImportarTodos() {
 }
 function mostraSenha(nome, r, tel) {
   modal(`<h3>Acesso de ${esc(nome)}</h3><p>Endereço: <b>${location.host}</b><br>Login: <b>${esc(r.login)}</b><br>Senha provisória: <b style="font-size:22px">${esc(r.senha)}</b></p><p class="sub">No primeiro acesso é pedida uma senha nova.</p>
-   <div class="acts"><a class="btn green" target="_blank" rel="noopener" href="${wa(tel, `Maranata, ${nome.split(' ')[0]}!\nO seu acesso ao *Campori 2026*:\n${location.origin}\nLogin: ${r.login}\nSenha: ${r.senha}`)}">${IC.wa} Enviar por WhatsApp</a><button class="btn sec" onclick="fechar();render()">Fechar</button></div>`);
+   <div class="acts"><a class="btn green" target="_blank" rel="noopener" href="${wa(tel, `Maranata, ${nome.split(' ')[0]}!\nO seu acesso ao *Campori 2026*:\n${location.origin}\nLogin: ${r.login}\nSenha: ${r.senha}\n\n📲 Para ter a app no telemóvel: abra o link no Chrome (Android) ou no Safari (iPhone) e toque em *Instalar a app*.`)}">${IC.wa} Enviar por WhatsApp</a><button class="btn sec" onclick="fechar();render()">Fechar</button></div>`);
 }
-function mAcesso(c) {
-  modal(`<h3>${esc(c.nome)}</h3><h3 style="margin-top:10px">Contacto do director</h3><p class="sub" style="margin:0">Para contactar o clube, mesmo que o director ainda não use a app.</p>
+async function mAcesso(c) {
+  const regs = await api('GET', '/regioes'), cc = S.clubes.find((x) => x.id === c.id) || {};
+  modal(`<h3>${esc(c.nome)}</h3>
+   <details style="margin-top:6px"><summary style="font-weight:600">✏️ Editar nome, igreja ou região</summary>
+    <label>Nome do clube</label><input id="enm" value="${esc(c.nome)}"><label>Igreja</label><input id="eig" value="${esc(cc.igreja || '')}">
+    <label>Região</label><select id="erg">${regs.map((r) => `<option value="${r.id}" ${r.id === c.regiao_id ? 'selected' : ''}>${esc(r.nome)}</option>`).join('')}</select>
+    <div class="acts"><button class="btn" id="gec">Guardar</button></div></details>
+   <h3 style="margin-top:10px">Contacto do director</h3><p class="sub" style="margin:0">Para contactar o clube, mesmo que o director ainda não use a app.</p>
    <div class="fl"><div><label>Nome</label><input id="cn" value="${esc(c.contacto_nome || c.dir_nome || '')}"></div><div><label>Telefone</label><input id="ct" inputmode="tel" value="${esc(c.contacto_tel || c.dir_tel || '')}"></div></div>
    <div class="acts" style="margin-top:8px">${botoesContacto(c.ct_nome, c.ct_tel, c.nome)}<button class="btn sec sm" id="gct">Guardar contacto</button></div>
    <h3 style="margin-top:18px">Acesso à app</h3>${c.dir_id ? `<p>Director: <b>${esc(c.dir_nome)}</b><br>${esc(c.dir_tel || c.dir_email || '')}</p><div class="acts"><button class="btn gold" id="rs">Repor senha</button></div><h3 style="margin-top:18px">Trocar de director</h3>` : '<p class="sub">Este clube ainda não tem director com acesso.</p>'}
    <form id="f"><label>Nome</label><input name="nome" required value="${c.dir_id ? '' : esc(c.contacto_nome || '')}"><label>Telefone</label><input name="telefone" inputmode="tel" required value="${c.dir_id ? '' : esc(c.contacto_tel || '')}"><div class="acts"><button type="button" class="btn sec" onclick="fechar()">Fechar</button><button class="btn">Criar acesso</button></div></form>
    <h3 style="margin-top:18px">Inscritos oficiais</h3><div style="display:flex;gap:8px"><input id="io" type="number" min="0" inputmode="numeric" value="${c.inscritos_oficial ?? ''}" placeholder="Nº oficial"><button class="btn sec" id="gio">Guardar</button></div>
-   <p class="sub">Com nome na app: ${c.n}. A Secretaria compara os dois números.</p>`, (m) => {
+   <p class="sub">Com nome na app: ${c.n}. A Secretaria compara os dois números.</p>
+   <details style="margin-top:18px"><summary style="color:var(--red);font-weight:600">Remover este clube</summary>
+    <p class="sub">Para um clube registado em duplicado ou com o nome errado. ${c.n ? `Tem <b>${c.n} nome(s)</b>: escolha o clube certo que os recebe (passam também pedidos, casos e transporte).` : 'Não tem nomes na app.'}</p>
+    <label>Passar os dados para o clube${c.n ? '' : ' (opcional)'}</label>${campoClube('rd')}
+    <div id="rof" hidden><label>Inscritos oficiais do clube que fica</label><input id="rio" type="number" min="0" inputmode="numeric"><p class="sub" id="rinf"></p></div>
+    <div class="acts"><button class="btn red" id="rm">Remover ${esc(c.nome)}</button></div></details>`, (m) => {
+    $('#gec', m).onclick = async () => { try { await api('PUT', '/editar-clube/' + c.id, { nome: $('#enm', m).value, igreja: $('#eig', m).value, regiao_id: +$('#erg', m).value });
+      S.clubes = await api('GET', '/clubes'); fechar(); toast('Clube actualizado'); renderTudo(); } catch (e) { toast(e.message, 1); } };
+    $('#rd', m).oninput = () => { const d = clubeDe($('#rd', m).value), ok = d && d.id !== c.id; $('#rof', m).hidden = !ok; if (!ok) return;
+      const dd = (CACHE.get('/visao') || []).find((x) => x.id === d.id) || {}; $('#rio', m).value = (c.inscritos_oficial || 0) + (dd.inscritos_oficial || 0);
+      $('#rinf', m).textContent = `Oficial agora: ${esc(c.nome)} ${c.inscritos_oficial ?? '—'} + ${d.nome} ${dd.inscritos_oficial ?? '—'}. Se for o mesmo clube contado duas vezes, ponha só o número certo.`; };
+    $('#rm', m).onclick = async () => { const d = clubeDe($('#rd', m).value);
+      if ($('#rd', m).value && (!d || d.id === c.id)) return toast('Escolha um clube da lista (diferente deste)', 1);
+      if (c.n && !d) return toast('Escolha o clube que recebe os nomes', 1);
+      if (!confirm(d ? `Remover "${c.nome}" e passar ${c.n} nome(s) para "${d.nome}"?` : `Remover "${c.nome}"? Esta acção não se pode desfazer.`)) return;
+      try { const r = await api('POST', '/remover-clube/' + c.id, { destino: d?.id || null, oficial: d ? $('#rio', m).value : null });
+        S.clubes = await api('GET', '/clubes'); fechar(); toast(r.destino ? `Clube removido · ${r.movidos} nome(s) passaram para ${r.destino}` : 'Clube removido'); renderTudo(); } catch (e) { toast(e.message, 1); } };
     $('#gio', m).onclick = async () => { try { await api('PUT', '/oficial/' + c.id, { inscritos: $('#io', m).value }); toast('Guardado'); } catch (e) { toast(e.message, 1); } };
     $('#gct', m).onclick = async () => { try { await api('PUT', '/contacto/' + c.id, { nome: $('#cn', m).value, telefone: $('#ct', m).value }); S.clubes = await api('GET', '/clubes'); fechar(); toast('Contacto guardado'); render(); } catch (e) { toast(e.message, 1); } };
     if (c.dir_id) $('#rs', m).onclick = async () => { try { mostraSenha(c.dir_nome, await api('POST', `/contas/${c.dir_id}/senha`), c.dir_tel); } catch (e) { toast(e.message, 1); } };

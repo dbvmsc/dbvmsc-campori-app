@@ -1,6 +1,6 @@
 // Service worker: guarda a interface para abrir rápido e funcionar com rede fraca. Os dados (/api) vêm sempre do servidor.
-const CACHE = 'campori-v4.7';
-const SHELL = ['/', '/index.html', '/style.css?v=4.7', '/app.js?v=4.7', '/logo.png', '/manifest.webmanifest'];
+const CACHE = 'campori-v4.9';
+const SHELL = ['/', '/index.html', '/style.css?v=4.9', '/app.js?v=4.9', '/logo.png', '/manifest.webmanifest'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', (e) => {

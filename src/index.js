@@ -1,5 +1,5 @@
 // Campori — versão simples (Cloudflare Worker + D1)
-const VERSAO = '4.7';
+const VERSAO = '4.9';
 
 const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const hoje = () => new Date(Date.now() + 3600e3).toISOString().slice(0, 10); // hora de Angola
@@ -410,7 +410,7 @@ async function api(req, DB, url) {
   }
 
   // ---- só Missão: contas e importação ----
-  if (['importar', 'contas', 'importar-acampantes', 'importar-oficiais', 'importar-contactos'].includes(p[0]) && !missao) throw new E('Só a Missão', 403);
+  if (['importar', 'contas', 'importar-acampantes', 'importar-oficiais', 'importar-contactos', 'remover-clube', 'editar-clube'].includes(p[0]) && !missao) throw new E('Só a Missão', 403);
   if (p[0] === 'importar' && M === 'POST') {
     const regs = Object.fromEntries((await DB.prepare('SELECT * FROM regioes').all()).results.map((r) => [r.nome.toLowerCase(), r.id]));
     const res = { clubes: 0, acessos: [], erros: [] };
@@ -471,6 +471,47 @@ async function api(req, DB, url) {
     }
     for (let i = 0; i < st.length; i += 100) await DB.batch(st.slice(i, i + 100));
     return json(res);
+  }
+  // Editar nome, igreja e região de um clube
+  if (p[0] === 'editar-clube' && M === 'PUT') {
+    const c = await DB.prepare('SELECT * FROM clubes WHERE id=?').bind(+p[1]).first();
+    if (!c) throw new E('Clube não encontrado', 404);
+    const b = await body(), nome = String(b.nome || '').trim().replace(/\s+/g, ' ').slice(0, 120), rid = +b.regiao_id || c.regiao_id;
+    if (!nome) throw new E('Escreva o nome do clube');
+    if (!(await DB.prepare('SELECT id FROM regioes WHERE id=?').bind(rid).first())) throw new E('Região inválida');
+    if (await DB.prepare('SELECT id FROM clubes WHERE regiao_id=? AND lower(nome)=lower(?) AND id<>?').bind(rid, nome, c.id).first()) throw new E('Já existe um clube com esse nome nessa região. Se é o mesmo, use "Remover este clube" para juntar os dois.');
+    await DB.batch([DB.prepare('UPDATE clubes SET nome=?, igreja=?, regiao_id=? WHERE id=?').bind(nome, String(b.igreja ?? c.igreja ?? '').trim().slice(0, 120), rid, c.id),
+      DB.prepare('UPDATE utilizadores SET regiao_id=? WHERE clube_id=?').bind(rid, c.id)]);
+    return json({ ok: true });
+  }
+  // Remover um clube (ex.: registado em duplicado). Com destino: os acampantes, pedidos, casos e transporte passam para o outro clube.
+  if (p[0] === 'remover-clube' && M === 'POST') {
+    const c = await DB.prepare('SELECT * FROM clubes WHERE id=?').bind(+p[1]).first();
+    if (!c) throw new E('Clube não encontrado', 404);
+    const b = await body(), n = (await DB.prepare('SELECT COUNT(*) n FROM participantes WHERE clube_id=?').bind(c.id).first()).n;
+    const d = b.destino ? await DB.prepare('SELECT * FROM clubes WHERE id=?').bind(+b.destino).first() : null;
+    if (b.destino && (!d || d.id === c.id)) throw new E('Escolha outro clube para receber os dados');
+    if (n && !d && !b.apagar_nomes) throw new E(`Este clube tem ${n} nome(s). Escolha o clube que os recebe.`);
+    const pids = `SELECT id FROM participantes WHERE clube_id=${c.id}`, st = [
+      DB.prepare(`DELETE FROM contrib_pagas WHERE participante_id IN (${pids})`), DB.prepare(`DELETE FROM itens_tem WHERE participante_id IN (${pids})`),
+      DB.prepare('DELETE FROM envios WHERE clube_id=?').bind(c.id), DB.prepare('DELETE FROM contribuicoes WHERE clube_id=?').bind(c.id),
+      DB.prepare('DELETE FROM itens WHERE clube_id=?').bind(c.id), DB.prepare('DELETE FROM modelos WHERE clube_id=?').bind(c.id), DB.prepare('DELETE FROM tarefas WHERE clube_id=?').bind(c.id)];
+    if (d) {
+      const temDir = await DB.prepare("SELECT id FROM utilizadores WHERE clube_id=? AND papel='director' AND ativo=1").bind(d.id).first();
+      const ofi = b.oficial === '' || b.oficial == null ? (c.inscritos_oficial == null && d.inscritos_oficial == null ? null : (c.inscritos_oficial || 0) + (d.inscritos_oficial || 0)) : Math.max(0, parseInt(b.oficial, 10) || 0);
+      st.push(DB.prepare('UPDATE participantes SET clube_id=? WHERE clube_id=?').bind(d.id, c.id), DB.prepare('UPDATE fichas SET clube_id=? WHERE clube_id=?').bind(d.id, c.id),
+        DB.prepare('UPDATE remessas SET clube_id=? WHERE clube_id=?').bind(d.id, c.id), DB.prepare('UPDATE pedidos SET clube_id=? WHERE clube_id=?').bind(d.id, c.id),
+        DB.prepare('UPDATE casos SET clube_id=? WHERE clube_id=?').bind(d.id, c.id), DB.prepare("UPDATE avisos SET clube_id=? WHERE alvo='clube' AND clube_id=?").bind(d.id, c.id),
+        DB.prepare('UPDATE clubes SET inscritos_oficial=?, contacto_nome=COALESCE(contacto_nome, ?), contacto_tel=COALESCE(contacto_tel, ?) WHERE id=?').bind(ofi, c.contacto_nome, c.contacto_tel, d.id),
+        temDir ? DB.prepare("UPDATE utilizadores SET ativo=0, clube_id=NULL WHERE clube_id=?").bind(c.id) : DB.prepare('UPDATE utilizadores SET clube_id=?, regiao_id=? WHERE clube_id=?').bind(d.id, d.regiao_id, c.id));
+    } else {
+      st.push(DB.prepare(`DELETE FROM fichas WHERE clube_id=?`).bind(c.id), DB.prepare('DELETE FROM participantes WHERE clube_id=?').bind(c.id), DB.prepare('DELETE FROM remessas WHERE clube_id=?').bind(c.id),
+        DB.prepare('DELETE FROM pedidos WHERE clube_id=?').bind(c.id), DB.prepare(`DELETE FROM caso_notas WHERE caso_id IN (SELECT id FROM casos WHERE clube_id=${c.id})`), DB.prepare('DELETE FROM casos WHERE clube_id=?').bind(c.id),
+        DB.prepare("DELETE FROM avisos WHERE alvo='clube' AND clube_id=?").bind(c.id), DB.prepare('UPDATE utilizadores SET ativo=0, clube_id=NULL WHERE clube_id=?').bind(c.id));
+    }
+    st.push(DB.prepare(`DELETE FROM sessoes WHERE user_id IN (SELECT id FROM utilizadores WHERE ativo=0)`), DB.prepare('DELETE FROM clubes WHERE id=?').bind(c.id));
+    await DB.batch(st);
+    return json({ ok: true, movidos: d ? n : 0, destino: d?.nome || null });
   }
   if (p[0] === 'oficial' && M === 'PUT') {
     if (!missao) throw new E('Só a Missão', 403);
